@@ -181,7 +181,7 @@ export default function EventForm({ editId }: Props) {
         </View>
 
         <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 200 }}
           keyboardShouldPersistTaps="handled"
         >
           <Label>Event Title</Label>
@@ -375,10 +375,9 @@ export default function EventForm({ editId }: Props) {
         onSelect={(loc) => {
           setLatitude(String(loc.latitude));
           setLongitude(String(loc.longitude));
+          // Only auto-fill location name if the field is empty — never clobber
+          // a name the organizer typed themselves.
           if (!locationName || locationName.length === 0) {
-            setLocationName(loc.label);
-          } else if (loc.label && loc.label !== locationName) {
-            // Only overwrite if user hasn't customised (avoid clobbering their typed name)
             setLocationName(loc.label);
           }
           setPickerOpen(false);

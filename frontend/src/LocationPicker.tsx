@@ -263,7 +263,7 @@ export default function LocationPicker({
               style={{ flex: 1, backgroundColor: colors.surfaceTertiary }}
             />
           )}
-          <View pointerEvents="none" style={styles.hintPill}>
+          <View style={[styles.hintPill, { pointerEvents: "none" }]}>
             <Ionicons name="hand-left" size={13} color={colors.onSurfaceInverse} />
             <Text style={styles.hintText}>Tap the map to drop a pin</Text>
           </View>
