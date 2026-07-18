@@ -1,11 +1,12 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, Platform, TextInput,
+  View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, Platform,
 } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as Location from "expo-location";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 type Props = {
@@ -73,23 +74,21 @@ function buildHtml(lat: number, lng: number): string {
     announce(marker.getLatLng());
   });
 
-  // Listen for center commands from RN
+  function centerTo(lat, lng) {
+    map.setView([lat, lng], 15);
+    marker.setLatLng([lat, lng]);
+  }
+
   window.addEventListener('message', function (event) {
     try {
       var data = JSON.parse(event.data);
-      if (data && data.type === 'center' && typeof data.lat === 'number') {
-        map.setView([data.lat, data.lng], 15);
-        marker.setLatLng([data.lat, data.lng]);
-      }
+      if (data && data.type === 'center' && typeof data.lat === 'number') centerTo(data.lat, data.lng);
     } catch (e) {}
   });
   document.addEventListener('message', function (event) {
     try {
       var data = JSON.parse(event.data);
-      if (data && data.type === 'center' && typeof data.lat === 'number') {
-        map.setView([data.lat, data.lng], 15);
-        marker.setLatLng([data.lat, data.lng]);
-      }
+      if (data && data.type === 'center' && typeof data.lat === 'number') centerTo(data.lat, data.lng);
     } catch (e) {}
   });
 
@@ -126,36 +125,16 @@ async function reverseGeocode(lat: number, lng: number): Promise<string | null> 
   }
 }
 
-async function forwardGeocode(query: string): Promise<{ lat: number; lng: number; label: string } | null> {
-  try {
-    const r = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,
-      { headers: { "Accept-Language": "en" } }
-    );
-    if (!r.ok) return null;
-    const data = await r.json();
-    if (!Array.isArray(data) || data.length === 0) return null;
-    const hit = data[0];
-    return {
-      lat: parseFloat(hit.lat),
-      lng: parseFloat(hit.lon),
-      label: hit.display_name || query,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export default function LocationPicker({
   visible, initialLat, initialLng, initialLabel, onCancel, onSelect,
 }: Props) {
   const html = useMemo(() => buildHtml(initialLat, initialLng), [initialLat, initialLng]);
   const [pin, setPin] = useState<Pin>({ lat: initialLat, lng: initialLng, label: initialLabel || "" });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching, setSearching] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [resolvingLabel, setResolvingLabel] = useState(false);
   const webviewRef = useRef<any>(null);
   const iframeRef = useRef<any>(null);
+  const requestedGpsRef = useRef(false);
 
   const sendCenter = (lat: number, lng: number) => {
     const msg = JSON.stringify({ type: "center", lat, lng });
@@ -168,41 +147,68 @@ export default function LocationPicker({
     }
   };
 
+  const resolveLabel = async (lat: number, lng: number) => {
+    setResolvingLabel(true);
+    const label = await reverseGeocode(lat, lng);
+    setResolvingLabel(false);
+    if (label) setPin({ lat, lng, label });
+  };
+
+  const fetchMyLocation = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setLocating(false);
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({});
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      setPin({ lat, lng, label: pin.label });
+      sendCenter(lat, lng);
+      resolveLabel(lat, lng);
+    } catch {
+      // ignore
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  // Auto-request current location the first time the picker becomes visible
+  useEffect(() => {
+    if (!visible) {
+      requestedGpsRef.current = false;
+      return;
+    }
+    if (requestedGpsRef.current) return;
+    requestedGpsRef.current = true;
+    fetchMyLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
   const handleMessage = async (raw: string) => {
     try {
       const data = JSON.parse(raw);
       if (data.type === "pin" && typeof data.lat === "number") {
         Haptics.selectionAsync();
         setPin((prev) => ({ lat: data.lat, lng: data.lng, label: prev.label }));
-        setResolvingLabel(true);
-        const label = await reverseGeocode(data.lat, data.lng);
-        setResolvingLabel(false);
-        if (label) setPin({ lat: data.lat, lng: data.lng, label });
+        resolveLabel(data.lat, data.lng);
       }
     } catch {}
   };
 
   // Web-only: listen for postMessage from iframe
-  React.useEffect(() => {
+  useEffect(() => {
     if (Platform.OS !== "web" || !visible) return;
     const handler = (event: MessageEvent) => {
       if (typeof event.data === "string") handleMessage(event.data);
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-
-  const submitSearch = async () => {
-    const q = searchQuery.trim();
-    if (!q) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSearching(true);
-    const hit = await forwardGeocode(q);
-    setSearching(false);
-    if (!hit) return;
-    setPin({ lat: hit.lat, lng: hit.lng, label: hit.label });
-    sendCenter(hit.lat, hit.lng);
-  };
 
   const confirmPin = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -221,31 +227,19 @@ export default function LocationPicker({
             <Ionicons name="close" size={22} color={colors.onSurface} />
           </Pressable>
           <Text style={styles.title}>Pick Location</Text>
-          <View style={styles.iconBtn} />
-        </SafeAreaView>
-
-        <View style={styles.searchWrap}>
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={18} color={colors.muted} />
-            <TextInput
-              testID="lp-search-input"
-              style={styles.searchInput}
-              placeholder="Search a place, address, or city"
-              placeholderTextColor={colors.muted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={submitSearch}
-              returnKeyType="search"
-            />
-            {searching ? (
+          <Pressable
+            onPress={fetchMyLocation}
+            style={styles.iconBtn}
+            testID="lp-my-location-btn"
+            disabled={locating}
+          >
+            {locating ? (
               <ActivityIndicator size="small" color={colors.brand} />
-            ) : searchQuery.length > 0 ? (
-              <Pressable onPress={submitSearch} testID="lp-search-go">
-                <Ionicons name="arrow-forward-circle" size={22} color={colors.brand} />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
+            ) : (
+              <Ionicons name="navigate" size={20} color={colors.brand} />
+            )}
+          </Pressable>
+        </SafeAreaView>
 
         <View style={styles.mapWrap}>
           {Platform.OS === "web" ? (
@@ -269,6 +263,10 @@ export default function LocationPicker({
               style={{ flex: 1, backgroundColor: colors.surfaceTertiary }}
             />
           )}
+          <View pointerEvents="none" style={styles.hintPill}>
+            <Ionicons name="hand-left" size={13} color={colors.onSurfaceInverse} />
+            <Text style={styles.hintText}>Tap the map to drop a pin</Text>
+          </View>
         </View>
 
         <View style={styles.footer}>
@@ -309,19 +307,14 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   title: { fontSize: 18, fontWeight: "700", color: colors.onSurface },
-  searchWrap: {
-    padding: spacing.md,
-    backgroundColor: colors.surfaceSecondary,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
-  },
-  searchBox: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg, height: 44,
-  },
-  searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
   mapWrap: { flex: 1, backgroundColor: colors.surfaceTertiary },
+  hintPill: {
+    position: "absolute", top: spacing.md, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(31,41,55,0.85)",
+    paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+  },
+  hintText: { color: colors.onSurfaceInverse, fontSize: 12, fontWeight: "600" },
   footer: {
     backgroundColor: colors.surfaceSecondary,
     padding: spacing.lg, paddingBottom: 28,

@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only testing for LocationPicker bug fix (iteration 3). ALL 7 requirements PASS on Expo web preview. Search bar successfully removed (no 'lp-search-input' / 'lp-search-go' testIDs, no 'Search' text in modal). Auto-geolocation on picker open works (map re-centered to granted geolocation 40.7128,-74.0060 = NYC). 'lp-my-location-btn' present in top-right header, re-fetches on tap. Tap-to-drop-pin works (pin moved to 40.71148,-74.00858 after tapping the map). Reverse geocoding via Nominatim resolves labels ('Civic Center, Lower Manhattan...' / 'Broadway, New York'). 'lp-confirm-btn' closes picker and auto-fills location-input on EventForm with the resolved address. 'lp-cancel-btn' dismisses picker cleanly. Login as demo@organizer.com/password123 successful; /create route rendered; iframe-based Leaflet map loads correctly. No red screen or blocking console errors observed (only benign React Native Web deprecation warnings: 'shadow*' style props and 'props.pointerEvents').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "EventForm (Create Event)", "issues": ["The sticky 'Publish Event' bottom bar overlaps the 'Pick location on map' card at the default mobile scroll position (touch target at y~686 sits directly under the sticky button y~690). Users must scroll the ScrollView before the card is tappable. Consider adding paddingBottom to ScrollView content equal to sticky bar height (already 140px but insufficient on 390x844 viewport when Location card is present). Non-blocking (works after scroll)."]}
+    ],
+    "react_native_issues": [
+      {"component": "RN Web deprecation", "issue": "Console emits 'shadow* style props are deprecated. Use \"boxShadow\"' warning. Non-blocking; likely from styles using shadowOffset/shadowOpacity in theme.ts or component styles. Reference: /app/frontend/src/theme.ts (shadows.floating used in LocationPicker/EventForm)."},
+      {"component": "RN Web deprecation", "issue": "Console emits 'props.pointerEvents is deprecated. Use style.pointerEvents'. Reference: /app/frontend/src/LocationPicker.tsx:266 (View pointerEvents=\"none\" on hint pill) and likely other View components."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Design/minor) In EventForm.tsx ScrollView contentContainerStyle, increase paddingBottom (currently 140) or use `useSafeAreaInsets().bottom + 160` so the Location card is not hidden by the sticky Publish Event bar on 390x844 viewports.",
+    "(Minor RN cleanup) Replace deprecated `shadow*` style props with `boxShadow` (or continue using platform-conditional shadows via StyleSheet). Not blocking.",
+    "(Minor RN cleanup) Move `pointerEvents=\"none\"` from prop to style in LocationPicker.tsx line 266 (and audit for other occurrences) to silence the RN Web deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "LocationPicker.tsx:157-177 fetchMyLocation() correctly uses expo-location.requestForegroundPermissionsAsync + getCurrentPositionAsync. On web this maps to browser geolocation; permission denial silently falls back to initialLat/Lng. Good.",
+    "LocationPicker.tsx:180-189 auto-fetch effect guarded by requestedGpsRef so it only runs once per picker open — correct.",
+    "LocationPicker.tsx:203-211 web-only postMessage listener for iframe messages properly cleaned up on unmount/visibility change.",
+    "LocationPicker.tsx:104 Nominatim reverse geocode should ideally include a 'User-Agent' header per Nominatim usage policy (in RN/browser you cannot set UA, so this is best-effort). Consider caching results to avoid rate limit at scale.",
+    "EventForm.tsx:378-383 label overwrite logic is contradictory: the `if !locationName` branch sets label, but the `else if (loc.label && loc.label !== locationName)` branch ALSO always overwrites — the comment says 'Only overwrite if user hasn't customised' but the code overwrites regardless. Consider removing the else-if branch so user's typed name is preserved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "100% (7/7 LocationPicker requirements pass)"},
+  "seed_data_creation": "None. Used seeded demo@organizer.com / password123.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "LocationPicker fix fully verified on web preview. Regression not exhaustively re-tested (only login, events list, and create form path exercised). If further changes touch EventForm submit / Discover feed / QR scanner / analytics / boost flow, re-run iteration_1/2 test suites. Note: to open the picker on 390x844 viewport, ScrollView must be scrolled ~200-400px because the sticky Publish Event footer overlaps the Location card at the initial scroll position; playwright automation must call page.mouse.wheel before clicking [data-testid=\"open-location-picker\"].",
+  "rca_of_issue": "N/A — this iteration is a verification pass for a previously-implemented bug fix (search bar removal + auto-geolocation). No new bugs found in the LocationPicker itself."
+}
