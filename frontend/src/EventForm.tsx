@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
+import LocationPicker from "@/src/LocationPicker";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
@@ -52,6 +53,7 @@ export default function EventForm({ editId }: Props) {
   const [seatCols, setSeatCols] = useState("8");
   const [totalSeats, setTotalSeats] = useState("100");
   const [timeSlots, setTimeSlots] = useState<string[]>([""]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!editId) return;
@@ -227,23 +229,40 @@ export default function EventForm({ editId }: Props) {
           <Label>Time (24h)</Label>
           <TextInput testID="time-input" style={styles.input} placeholder="19:30" value={timeStr} onChangeText={setTimeStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
 
-          <Label>Location Name</Label>
-          <TextInput testID="location-input" style={styles.input} placeholder="Golden Gate Park" value={locationName} onChangeText={setLocationName} placeholderTextColor={colors.muted} />
-
-          <View style={styles.row2}>
-            <View style={{ flex: 1 }}>
-              <Label>Latitude</Label>
-              <TextInput testID="lat-input" style={styles.input} value={latitude} onChangeText={setLatitude} keyboardType="numeric" placeholderTextColor={colors.muted} />
+          <Label>Location</Label>
+          <Pressable
+            style={styles.locPicker}
+            onPress={() => setPickerOpen(true)}
+            testID="open-location-picker"
+          >
+            <View style={styles.locIcon}>
+              <Ionicons name="map" size={18} color={colors.brand} />
             </View>
             <View style={{ flex: 1 }}>
-              <Label>Longitude</Label>
-              <TextInput testID="lng-input" style={styles.input} value={longitude} onChangeText={setLongitude} keyboardType="numeric" placeholderTextColor={colors.muted} />
+              <Text style={styles.locPickerTitle} numberOfLines={1}>
+                {locationName || "Pick location on map"}
+              </Text>
+              <Text style={styles.locPickerSub}>
+                {latitude && longitude
+                  ? `${parseFloat(latitude).toFixed(4)}, ${parseFloat(longitude).toFixed(4)}`
+                  : "Tap to search or drop a pin"}
+              </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.borderStrong} />
+          </Pressable>
           <Pressable onPress={useMyGPS} style={styles.gpsBtn} testID="use-my-gps-btn">
             <Ionicons name="navigate" size={16} color={colors.brand} />
-            <Text style={styles.gpsText}>Use my current location</Text>
+            <Text style={styles.gpsText}>Or use my current location</Text>
           </Pressable>
+
+          <TextInput
+            testID="location-input"
+            style={[styles.input, { marginTop: spacing.sm }]}
+            placeholder="Location name (e.g. Golden Gate Park)"
+            value={locationName}
+            onChangeText={setLocationName}
+            placeholderTextColor={colors.muted}
+          />
 
           {!isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude)) && (
             <View style={{ marginTop: spacing.sm }}>
@@ -346,6 +365,25 @@ export default function EventForm({ editId }: Props) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <LocationPicker
+        visible={pickerOpen}
+        initialLat={parseFloat(latitude) || 37.7749}
+        initialLng={parseFloat(longitude) || -122.4194}
+        initialLabel={locationName}
+        onCancel={() => setPickerOpen(false)}
+        onSelect={(loc) => {
+          setLatitude(String(loc.latitude));
+          setLongitude(String(loc.longitude));
+          if (!locationName || locationName.length === 0) {
+            setLocationName(loc.label);
+          } else if (loc.label && loc.label !== locationName) {
+            // Only overwrite if user hasn't customised (avoid clobbering their typed name)
+            setLocationName(loc.label);
+          }
+          setPickerOpen(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -400,6 +438,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8, marginTop: 2,
   },
   gpsText: { color: colors.brand, fontSize: 13, fontWeight: "500" },
+  locPicker: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderColor: colors.border, borderWidth: 1,
+  },
+  locIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  locPickerTitle: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
+  locPickerSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   typeCol: { gap: spacing.sm },
   typeItem: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
