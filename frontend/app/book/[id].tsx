@@ -29,6 +29,8 @@ export default function Booking() {
   const [error, setError] = useState<string | null>(null);
   const [rzpOrder, setRzpOrder] = useState<RzpOrder | null>(null);
   const [rzpVisible, setRzpVisible] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"online" | "venue">("online");
+  const [gatewayConfigured, setGatewayConfigured] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -36,6 +38,16 @@ export default function Booking() {
         const [e, b] = await Promise.all([api.getEvent(String(id)), api.bookedSeats(String(id))]);
         setEvent(e);
         setBooked(b);
+        // Determine payment gateway availability so we can hide the online option gracefully
+        try {
+          const cfg = await api.paymentConfig();
+          const configured = !!cfg?.configured;
+          setGatewayConfigured(configured);
+          if (!configured) setPaymentMethod("venue");
+        } catch {
+          setGatewayConfigured(false);
+          setPaymentMethod("venue");
+        }
       } catch (err) {
         console.log("Booking load error", err);
       } finally {
@@ -69,8 +81,9 @@ export default function Booking() {
     setError(null);
     setSubmitting(true);
     try {
-      if (event.price > 0 && totalPrice > 0) {
-        // Try to create a Razorpay order
+      const wantsOnline = event.price > 0 && totalPrice > 0 && paymentMethod === "online";
+
+      if (wantsOnline) {
         try {
           const order = await api.createPaymentOrder({
             kind: "booking",
@@ -84,10 +97,11 @@ export default function Booking() {
           setSubmitting(false);
           return;
         } catch (payErr: any) {
-          // Payments not configured or gateway error → offer pay-at-venue fallback
           const msg = payErr?.message || "";
           if (msg.includes("not configured") || msg.includes("503")) {
-            // Fall back silently to pay-at-venue
+            // Gateway went down mid-session — fall back gracefully
+            setGatewayConfigured(false);
+            setPaymentMethod("venue");
           } else {
             setError(msg);
             setSubmitting(false);
@@ -96,7 +110,7 @@ export default function Booking() {
         }
       }
 
-      // Pay at venue / free
+      // Pay-at-venue path (or free event)
       const body: any = { event_id: String(id) };
       if (event.booking_type === "seat_map") body.seats = selectedSeats;
       if (event.booking_type === "general") body.num_seats = numSeats;
@@ -180,6 +194,29 @@ export default function Booking() {
           />
         )}
 
+        {event.price > 0 && totalPrice > 0 && (
+          <View style={styles.payMethodBlock}>
+            <Text style={styles.payMethodTitle}>Payment method</Text>
+            <PayMethodOption
+              testID="pay-method-online"
+              active={paymentMethod === "online"}
+              disabled={!gatewayConfigured}
+              icon="card"
+              title="Pay online"
+              subtitle={gatewayConfigured ? "Secure checkout via Razorpay · instant confirmation" : "Payment gateway unavailable"}
+              onPress={() => { Haptics.selectionAsync(); setPaymentMethod("online"); }}
+            />
+            <PayMethodOption
+              testID="pay-method-venue"
+              active={paymentMethod === "venue"}
+              icon="cash-outline"
+              title="Pay at venue"
+              subtitle="Reserve now · pay when you arrive"
+              onPress={() => { Haptics.selectionAsync(); setPaymentMethod("venue"); }}
+            />
+          </View>
+        )}
+
         {error && <Text style={styles.error} testID="booking-error">{error}</Text>}
       </ScrollView>
 
@@ -200,9 +237,15 @@ export default function Booking() {
             {submitting ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
               <>
                 <Text style={styles.ctaText}>
-                  {totalPrice > 0 ? "Pay & Confirm" : "Confirm Booking"}
+                  {totalPrice > 0
+                    ? (paymentMethod === "online" ? "Pay & Confirm" : "Reserve · Pay at Venue")
+                    : "Confirm Booking"}
                 </Text>
-                <Ionicons name={totalPrice > 0 ? "card" : "checkmark-circle"} size={18} color={colors.onBrandPrimary} />
+                <Ionicons
+                  name={totalPrice > 0 && paymentMethod === "online" ? "card" : "checkmark-circle"}
+                  size={18}
+                  color={colors.onBrandPrimary}
+                />
               </>
             )}
           </Pressable>
@@ -247,6 +290,39 @@ export default function Booking() {
         onError={(msg) => { setRzpVisible(false); setError(msg); setRzpOrder(null); }}
       />
     </SafeAreaView>
+  );
+}
+
+function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, testID }: {
+  active: boolean;
+  disabled?: boolean;
+  icon: any;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={disabled ? undefined : onPress}
+      style={[
+        styles.payOpt,
+        active && styles.payOptActive,
+        disabled && styles.payOptDisabled,
+      ]}
+    >
+      <View style={[styles.payOptIcon, active && styles.payOptIconActive]}>
+        <Ionicons name={icon} size={18} color={active ? colors.onBrandPrimary : colors.onSurfaceTertiary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.payOptTitle, disabled && { color: colors.muted }]}>{title}</Text>
+        <Text style={styles.payOptSub}>{subtitle}</Text>
+      </View>
+      <View style={[styles.payRadio, active && styles.payRadioActive]}>
+        {active && <View style={styles.payRadioDot} />}
+      </View>
+    </Pressable>
   );
 }
 
@@ -486,4 +562,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl, paddingVertical: 14, alignSelf: "stretch", alignItems: "center",
   },
   successBtnText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+
+  // Payment method selector
+  payMethodBlock: {
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  payMethodTitle: {
+    fontSize: 16, fontWeight: "700", color: colors.onSurface,
+    marginBottom: 4,
+  },
+  payOpt: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.border, borderWidth: 1,
+  },
+  payOptActive: {
+    borderColor: colors.brand,
+    backgroundColor: colors.brandTertiary,
+  },
+  payOptDisabled: {
+    opacity: 0.5,
+  },
+  payOptIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  payOptIconActive: { backgroundColor: colors.brandPrimary },
+  payOptTitle: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
+  payOptSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  payRadio: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: colors.borderStrong,
+    alignItems: "center", justifyContent: "center",
+  },
+  payRadioActive: { borderColor: colors.brand },
+  payRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brand },
 });
