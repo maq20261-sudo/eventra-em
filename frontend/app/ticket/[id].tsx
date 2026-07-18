@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { api } from "@/src/api";
+import EventMap from "@/src/EventMap";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 function fmtDate(iso: string) {
@@ -146,6 +147,16 @@ export default function TicketScreen() {
                 </Text>
               </View>
             )}
+
+            <View style={styles.venueBlock}>
+              <Text style={styles.venueTitle}>Venue</Text>
+              <EventMap
+                latitude={e.latitude}
+                longitude={e.longitude}
+                label={e.location_name}
+                height={160}
+              />
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -229,4 +240,6 @@ const styles = StyleSheet.create({
     padding: spacing.md, borderRadius: radius.md,
   },
   paidNoticeText: { fontSize: 13, color: colors.onBrandTertiary, flex: 1, fontWeight: "500" },
+  venueBlock: { marginTop: spacing.lg, gap: spacing.sm },
+  venueTitle: { fontSize: 14, fontWeight: "700", color: colors.onSurface },
 });

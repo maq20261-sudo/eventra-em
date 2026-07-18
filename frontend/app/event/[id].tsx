@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
+import EventMap from "@/src/EventMap";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 export default function EventDetail() {
@@ -125,15 +126,16 @@ export default function EventDetail() {
           </View>
 
           <Text style={styles.sectionTitle}>Location</Text>
-          <View style={styles.mapCard}>
-            <View style={styles.mapPreview}>
-              <Ionicons name="map" size={32} color={colors.brand} />
-              <Text style={styles.mapText}>{event.location_name}</Text>
-              <Text style={styles.mapCoords}>
-                {event.latitude.toFixed(4)}, {event.longitude.toFixed(4)}
-              </Text>
-            </View>
+          <View style={styles.locHeader}>
+            <Ionicons name="location" size={16} color={colors.brand} />
+            <Text style={styles.locName} numberOfLines={1}>{event.location_name}</Text>
           </View>
+          <EventMap
+            latitude={event.latitude}
+            longitude={event.longitude}
+            label={event.location_name}
+            height={200}
+          />
         </View>
       </ScrollView>
 
@@ -246,6 +248,11 @@ const styles = StyleSheet.create({
   mapPreview: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
   mapText: { fontSize: 15, color: colors.onBrandTertiary, fontWeight: "600" },
   mapCoords: { fontSize: 12, color: colors.onBrandTertiary, opacity: 0.7 },
+  locHeader: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginTop: -spacing.xs,
+  },
+  locName: { flex: 1, fontSize: 14, color: colors.onSurface, fontWeight: "500" },
   stickyBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
     backgroundColor: colors.surfaceSecondary,

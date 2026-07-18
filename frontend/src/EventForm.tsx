@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { api } from "@/src/api";
+import EventMap from "@/src/EventMap";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
@@ -243,6 +244,17 @@ export default function EventForm({ editId }: Props) {
             <Ionicons name="navigate" size={16} color={colors.brand} />
             <Text style={styles.gpsText}>Use my current location</Text>
           </Pressable>
+
+          {!isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude)) && (
+            <View style={{ marginTop: spacing.sm }}>
+              <EventMap
+                latitude={parseFloat(latitude)}
+                longitude={parseFloat(longitude)}
+                label={locationName || "Event location"}
+                height={160}
+              />
+            </View>
+          )}
 
           <Label>Ticket Price (USD)</Label>
           <TextInput testID="price-input" style={styles.input} placeholder="0" value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor={colors.muted} />
