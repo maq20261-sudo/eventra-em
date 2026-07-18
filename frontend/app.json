@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl"
+      "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Find events happening near you"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +21,11 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.discoverbookevents.kb2hgl"
+      "package": "com.emergent.discoverbookevents.kb2hgl",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
