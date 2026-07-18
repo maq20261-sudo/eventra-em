@@ -1,11 +1,12 @@
 import { useState, useCallback } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Modal,
 } from "react-native";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
@@ -13,7 +14,7 @@ type Event = {
   id: string; title: string; date: string; image_url?: string;
   category: string; booked_count: number; location_name: string; price: number;
   booking_type: string; total_seats?: number; seat_rows?: number; seat_cols?: number;
-  time_slots?: string[];
+  time_slots?: string[]; is_featured?: boolean; featured_until?: string | null;
 };
 
 function fmt(iso: string) {
@@ -25,6 +26,9 @@ export default function OrganizerEvents() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [boostEvent, setBoostEvent] = useState<Event | null>(null);
+  const [boostLoading, setBoostLoading] = useState<string | null>(null);
+  const [boostSuccess, setBoostSuccess] = useState<string | null>(null);
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -46,6 +50,23 @@ export default function OrganizerEvents() {
     if (e.booking_type === "general") return e.total_seats || 0;
     if (e.booking_type === "time_slot") return e.time_slots?.length || 0;
     return 0;
+  };
+
+  const runBoost = async (tier: "24h" | "7d" | "30d") => {
+    if (!boostEvent) return;
+    setBoostLoading(tier);
+    try {
+      const res = await api.featureEvent(boostEvent.id, tier);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setBoostSuccess(`Boosted for $${res.amount_charged.toFixed(2)}!`);
+      setBoostEvent(null);
+      await load();
+      setTimeout(() => setBoostSuccess(null), 2500);
+    } catch {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setBoostLoading(null);
+    }
   };
 
   return (
@@ -89,35 +110,117 @@ export default function OrganizerEvents() {
             const cap = capacity(e);
             const pct = cap > 0 ? Math.min(100, Math.round((e.booked_count / cap) * 100)) : 0;
             return (
-              <Pressable
-                key={e.id}
-                testID={`org-event-${e.id}`}
-                style={styles.card}
-                onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
-              >
-                <Image source={e.image_url} style={styles.thumb} contentFit="cover" />
-                <View style={styles.body}>
-                  <View style={styles.rowTop}>
-                    <View style={styles.catBadge}><Text style={styles.catText}>{e.category}</Text></View>
-                    <Text style={styles.date}>{fmt(e.date)}</Text>
-                  </View>
-                  <Text style={styles.eventTitle} numberOfLines={1}>{e.title}</Text>
-                  <View style={styles.metaRow}>
-                    <Ionicons name="location-outline" size={12} color={colors.muted} />
-                    <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
-                  </View>
-                  <View style={styles.progressWrap}>
-                    <View style={styles.progressBg}>
-                      <View style={[styles.progressFill, { width: `${pct}%` }]} />
+              <View key={e.id} style={styles.card} testID={`org-event-${e.id}`}>
+                <Pressable
+                  style={styles.cardTop}
+                  onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
+                >
+                  <Image source={e.image_url} style={styles.thumb} contentFit="cover" />
+                  <View style={styles.body}>
+                    <View style={styles.rowTop}>
+                      <View style={styles.catBadge}><Text style={styles.catText}>{e.category}</Text></View>
+                      <Text style={styles.date}>{fmt(e.date)}</Text>
                     </View>
-                    <Text style={styles.progressText}>{e.booked_count}/{cap} · {pct}%</Text>
+                    <Text style={styles.eventTitle} numberOfLines={1}>{e.title}</Text>
+                    <View style={styles.metaRow}>
+                      <Ionicons name="location-outline" size={12} color={colors.muted} />
+                      <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
+                    </View>
+                    <View style={styles.progressWrap}>
+                      <View style={styles.progressBg}>
+                        <View style={[styles.progressFill, { width: `${pct}%` }]} />
+                      </View>
+                      <Text style={styles.progressText}>{e.booked_count}/{cap} · {pct}%</Text>
+                    </View>
                   </View>
+                </Pressable>
+                <View style={styles.cardActions}>
+                  <Pressable
+                    style={[styles.boostBtn, e.is_featured && styles.boostBtnActive]}
+                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setBoostEvent(e); }}
+                    testID={`boost-btn-${e.id}`}
+                  >
+                    <Ionicons name="flame" size={14} color={e.is_featured ? colors.onBrandPrimary : "#F59E0B"} />
+                    <Text style={[styles.boostText, e.is_featured && { color: colors.onBrandPrimary }]}>
+                      {e.is_featured ? "Featured" : "Boost"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.editBtn}
+                    onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
+                    testID={`edit-btn-${e.id}`}
+                  >
+                    <Ionicons name="create-outline" size={14} color={colors.onSurface} />
+                    <Text style={styles.editText}>Edit</Text>
+                  </Pressable>
                 </View>
-              </Pressable>
+              </View>
             );
           })}
           <View style={{ height: 32 }} />
         </ScrollView>
+      )}
+
+      {/* Boost modal */}
+      <Modal visible={!!boostEvent} transparent animationType="slide" onRequestClose={() => setBoostEvent(null)}>
+        <Pressable style={styles.modalBg} onPress={() => setBoostEvent(null)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.boostHeader}>
+              <View style={styles.boostIcon}>
+                <Ionicons name="flame" size={24} color="#F59E0B" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.boostTitle}>Boost this event</Text>
+                <Text style={styles.boostSub} numberOfLines={1}>{boostEvent?.title}</Text>
+              </View>
+            </View>
+            <Text style={styles.boostDesc}>
+              Featured events appear at the top of Discover with a highlighted badge — get up to 5× more views.
+            </Text>
+
+            {[
+              { key: "24h", price: 4.99, label: "1 Day", note: "Perfect for launches" },
+              { key: "7d", price: 14.99, label: "7 Days", note: "Most popular", popular: true },
+              { key: "30d", price: 39.99, label: "30 Days", note: "Best value" },
+            ].map((t: any) => (
+              <Pressable
+                key={t.key}
+                style={[styles.tierRow, t.popular && styles.tierRowPopular]}
+                onPress={() => runBoost(t.key)}
+                disabled={!!boostLoading}
+                testID={`boost-tier-${t.key}`}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={styles.tierLabelRow}>
+                    <Text style={styles.tierLabel}>{t.label}</Text>
+                    {t.popular && <View style={styles.popularPill}><Text style={styles.popularText}>Popular</Text></View>}
+                  </View>
+                  <Text style={styles.tierNote}>{t.note}</Text>
+                </View>
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.tierPrice}>${t.price.toFixed(2)}</Text>
+                  {boostLoading === t.key ? (
+                    <ActivityIndicator size="small" color={colors.brand} />
+                  ) : (
+                    <Text style={styles.tierAction}>Boost →</Text>
+                  )}
+                </View>
+              </Pressable>
+            ))}
+            <Text style={styles.boostFine}>
+              Simulated payment for MVP. Integrate a payment gateway before going live.
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Success toast */}
+      {boostSuccess && (
+        <View style={styles.toast} pointerEvents="none">
+          <Ionicons name="checkmark-circle" size={18} color={colors.onBrandPrimary} />
+          <Text style={styles.toastText}>{boostSuccess}</Text>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -148,10 +251,35 @@ const styles = StyleSheet.create({
   emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
   list: { padding: spacing.lg, gap: spacing.md },
   card: {
-    flexDirection: "row", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.card,
   },
+  cardTop: {
+    flexDirection: "row", gap: spacing.md,
+  },
+  cardActions: {
+    flexDirection: "row", gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopColor: colors.divider, borderTopWidth: 1,
+  },
+  boostBtn: {
+    flex: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4,
+    backgroundColor: "#FEF3C7",
+    paddingVertical: 10, borderRadius: radius.pill,
+  },
+  boostBtnActive: {
+    backgroundColor: "#F59E0B",
+  },
+  boostText: { fontSize: 13, color: "#92400E", fontWeight: "600" },
+  editBtn: {
+    flex: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4,
+    backgroundColor: colors.surfaceTertiary,
+    paddingVertical: 10, borderRadius: radius.pill,
+  },
+  editText: { fontSize: 13, color: colors.onSurface, fontWeight: "600" },
   thumb: { width: 84, height: 84, borderRadius: radius.md, backgroundColor: colors.surfaceTertiary },
   body: { flex: 1, gap: 4, justifyContent: "space-between" },
   rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -169,4 +297,52 @@ const styles = StyleSheet.create({
   },
   progressFill: { height: "100%", backgroundColor: colors.brand, borderRadius: 3 },
   progressText: { fontSize: 11, color: colors.muted, fontWeight: "500" },
+
+  modalBg: { flex: 1, backgroundColor: "rgba(17,24,39,0.5)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.surfaceSecondary,
+    borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    padding: spacing.xl, paddingBottom: 48, gap: spacing.md,
+  },
+  sheetHandle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, alignSelf: "center",
+  },
+  boostHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  boostIcon: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center", justifyContent: "center",
+  },
+  boostTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
+  boostSub: { fontSize: 13, color: colors.muted, marginTop: 2 },
+  boostDesc: { fontSize: 14, color: colors.onSurfaceTertiary, lineHeight: 20 },
+  tierRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderColor: colors.border, borderWidth: 1,
+    backgroundColor: colors.surface,
+  },
+  tierRowPopular: {
+    borderColor: colors.brand, backgroundColor: colors.brandTertiary,
+  },
+  tierLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  tierLabel: { fontSize: 16, color: colors.onSurface, fontWeight: "700" },
+  popularPill: {
+    backgroundColor: colors.brand, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+  },
+  popularText: { color: colors.onBrandPrimary, fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
+  tierNote: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  tierPrice: { fontSize: 18, color: colors.onSurface, fontWeight: "700" },
+  tierAction: { fontSize: 12, color: colors.brand, fontWeight: "600", marginTop: 2 },
+  boostFine: { fontSize: 11, color: colors.muted, textAlign: "center", marginTop: spacing.sm },
+
+  toast: {
+    position: "absolute", top: 80, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: spacing.lg, paddingVertical: 12,
+    borderRadius: radius.pill, ...shadows.floating,
+  },
+  toastText: { color: colors.onBrandPrimary, fontWeight: "600" },
 });

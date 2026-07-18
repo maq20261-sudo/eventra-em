@@ -175,11 +175,16 @@ export default function Booking() {
               style={styles.successBtn}
               testID="view-tickets-btn"
               onPress={() => {
-                setSuccess(null);
-                router.replace("/(consumer)/bookings" as any);
+                if (success?.id) {
+                  setSuccess(null);
+                  router.replace(`/ticket/${success.id}` as any);
+                } else {
+                  setSuccess(null);
+                  router.replace("/(consumer)/bookings" as any);
+                }
               }}
             >
-              <Text style={styles.successBtnText}>View my tickets</Text>
+              <Text style={styles.successBtnText}>View my ticket</Text>
             </Pressable>
           </View>
         </View>

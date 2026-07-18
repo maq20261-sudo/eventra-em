@@ -38,6 +38,15 @@ export default function OrganizerLayout() {
         }}
       />
       <Tabs.Screen
+        name="scanner"
+        options={{
+          title: "Scan",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "scan" : "scan-outline"} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="analytics"
         options={{
           title: "Analytics",

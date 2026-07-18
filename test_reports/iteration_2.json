@@ -1,0 +1,60 @@
+{
+  "summary": "Backend-only testing for iteration 2 (QR check-in + Featured/Boosted events). 49/50 pytest cases PASS (98%). All 37 previous regression tests still PASS. All new check-in flows PASS (success, idempotency, 404 not-found, 400 cancelled, 403 wrong-organizer, 403 consumer). All new feature/boost flows PASS (tier listing, boost success, time-stacking on second call, 403 wrong-organizer, 403 consumer, featured event returned first in list with is_featured=true). One CRITICAL backend bug found: /api/analytics/organizer never increments checked_in_tickets and its total_tickets/total_revenue DECREASE after check-in, because the analytics query filters status='confirmed' only and check-in changes status to 'checked_in'.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/analytics/organizer",
+        "issue": "checked_in_tickets is always 0 after check-in AND total_tickets/total_revenue drop after check-in. Root cause: server.py line 548-550 filters bookings by {'status': 'confirmed'}, but /api/checkin sets status to 'checked_in' (line 529). Checked-in bookings are therefore excluded from analytics entirely. Fix: query {'status': {'$in': ['confirmed', 'checked_in']}} (or filter only by 'status != cancelled'), so that checked-in bookings continue to count toward revenue/tickets and checked_in_tickets can be incremented.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "auth/register|login (passlib)",
+        "issue": "Passlib emits 'error reading bcrypt version' AttributeError warning at import (bcrypt>=4 removed __about__). Non-functional; hashing works. Pin bcrypt<4 or upgrade passlib to silence."
+      },
+      {
+        "endpoint": "POST /api/events/{id}/feature",
+        "issue": "GET /api/events/{id}/feature-tiers does not validate that the event exists — returns the tiers dict for any event_id including bogus ones. Low priority."
+      },
+      {
+        "endpoint": "POST /api/events/{id}/feature",
+        "issue": "No 404 handling when boosting a non-existent event returns 404 (correct) but there is no idempotency/rate-limit; caller could double-charge themselves. Cosmetic — main agent may add UI guard."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_gatherspace_api.py",
+    "/app/backend/tests/test_checkin_and_feature.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "FIX ANALYTICS BUG: In /app/backend/server.py organizer_analytics() (line ~548), change the bookings filter from {'status': 'confirmed'} to {'status': {'$in': ['confirmed', 'checked_in']}} so that (a) checked-in tickets are still counted in total_tickets/total_revenue, and (b) checked_in_tickets increments after /api/checkin. This is required for the review request assertion 'checked_in_tickets increments after check-in' to hold.",
+    "(Minor) Consider validating event existence in GET /api/events/{id}/feature-tiers (currently returns tier map for any id).",
+    "(Minor) Pin bcrypt<4 in requirements.txt to suppress passlib warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py:529 — check-in sets status='checked_in' but analytics filter is status='confirmed' -> checked_in_tickets stays 0 and total_tickets/total_revenue shrink after every check-in. This is the biggest issue in this iteration.",
+    "server.py:467-469 — GET /api/events/{event_id}/feature-tiers ignores event_id and never verifies the event exists (returns tiers for garbage ids).",
+    "server.py:471-499 — feature_event() lacks amount/tier persistence & audit trail; only featured_until is stored, so there's no history of purchases (fine for MVP without payments, but flag).",
+    "server.py:481-488 — datetime.fromisoformat(current_until) may raise on odd formats; wrapped in try/except with silent fallback to `now`, which is fine but could mask corrupted data.",
+    "server.py:285-291 — sort_key uses date string for secondary sort when lat/lng absent, but 'date' is stored as raw string. Works because ISO dates sort lexicographically, but a comment would help."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_checkin_and_feature.py (created)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "98% (49/50)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Ran `python /app/backend/seed.py` before AND after test run to reset DB state (5 events + 2 demo users). Additional test events created during run are cleaned up via test fixture teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 covers QR check-in (POST /api/checkin) and Featured/Boost (GET /api/events/{id}/feature-tiers, POST /api/events/{id}/feature). All new endpoints work except one integration point: check-in changes booking.status to 'checked_in', but /api/analytics/organizer only counts status='confirmed' — after fix, re-run pytest test_checked_in_tickets_field and confirm total_tickets does not drop after a check-in either. Test suite files are /app/backend/tests/test_gatherspace_api.py (37 regression) + /app/backend/tests/test_checkin_and_feature.py (13 new). Demo creds unchanged. Re-seed with `python /app/backend/seed.py` before frontend testing.",
+  "rca_of_issue": "BUG: analytics.checked_in_tickets never increments. Reproduction: (1) login as demo@organizer.com, (2) create event, (3) have consumer book 2 seats, (4) POST /api/checkin — booking.status becomes 'checked_in'. (5) GET /api/analytics/organizer -> checked_in_tickets=0 and total_tickets DROPS by 2. Root cause: server.py:548 `db.bookings.find({'event_id': {'$in': event_ids}, 'status': 'confirmed'})` filters out checked-in bookings. Mitigation: change filter to include both 'confirmed' and 'checked_in' statuses (or equivalently, filter out only 'cancelled')."
+}

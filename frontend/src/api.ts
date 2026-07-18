@@ -83,6 +83,15 @@ export const api = {
   cancelBooking: (id: string) =>
     request(`/bookings/${id}/cancel`, { method: "POST" }, true),
 
+  // Feature/Boost
+  getFeatureTiers: (id: string) => request(`/events/${id}/feature-tiers`, { method: "GET" }),
+  featureEvent: (id: string, tier: "24h" | "7d" | "30d") =>
+    request(`/events/${id}/feature`, { method: "POST", body: JSON.stringify({ tier }) }, true),
+
+  // Check-in
+  checkIn: (bookingId: string) =>
+    request(`/checkin`, { method: "POST", body: JSON.stringify({ booking_id: bookingId }) }, true),
+
   // Analytics
   organizerAnalytics: () => request("/analytics/organizer", { method: "GET" }, true),
 };

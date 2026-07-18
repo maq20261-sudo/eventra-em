@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Find events happening near you"
+        "NSLocationWhenInUseUsageDescription": "Find events happening near you",
+        "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance"
       }
     },
     "android": {
@@ -24,7 +25,8 @@
       "package": "com.emergent.discoverbookevents.kb2hgl",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "CAMERA"
       ]
     },
     "web": {
@@ -41,6 +43,12 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#000000"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan ticket QR codes at your event entrance"
         }
       ]
     ],

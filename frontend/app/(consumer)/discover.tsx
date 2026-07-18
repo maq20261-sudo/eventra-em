@@ -37,6 +37,7 @@ type Event = {
   price: number;
   booking_type: string;
   distance_km?: number | null;
+  is_featured?: boolean;
 };
 
 function formatDate(iso: string) {
@@ -210,6 +211,12 @@ export default function Discover() {
                 <View style={styles.catBadge}>
                   <Text style={styles.catBadgeText}>{e.category}</Text>
                 </View>
+                {e.is_featured && (
+                  <View style={styles.featuredBadge}>
+                    <Ionicons name="flame" size={11} color={colors.onBrandPrimary} />
+                    <Text style={styles.featuredText}>Featured</Text>
+                  </View>
+                )}
                 <View style={styles.priceBadge}>
                   <Text style={styles.priceBadgeText}>
                     {e.price > 0 ? `$${e.price.toFixed(0)}` : "Free"}
@@ -352,6 +359,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   priceBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+  featuredBadge: {
+    position: "absolute", top: 12, left: 90,
+    flexDirection: "row", alignItems: "center", gap: 3,
+    backgroundColor: "#F59E0B",
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  featuredText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
   cardBody: { padding: spacing.lg, gap: 6 },
   cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },

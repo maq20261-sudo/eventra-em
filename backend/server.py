@@ -104,6 +104,8 @@ class EventOut(BaseModel):
     organizer_name: str
     booked_count: int = 0
     distance_km: Optional[float] = None
+    is_featured: bool = False
+    featured_until: Optional[str] = None
     created_at: str
 
 class BookingCreate(BaseModel):
@@ -117,11 +119,14 @@ class BookingOut(BaseModel):
     event_id: str
     event: Optional[EventOut] = None
     user_id: str
+    user_name: Optional[str] = None
     seats: Optional[List[str]] = None
     num_seats: Optional[int] = None
     time_slot: Optional[str] = None
     total_price: float
-    status: str  # confirmed / cancelled
+    status: str  # confirmed / cancelled / checked_in
+    checked_in: bool = False
+    checked_in_at: Optional[str] = None
     created_at: str
 
 # ---------- Helpers ----------
@@ -171,6 +176,9 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return R * c
 
 def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    featured_until = e.get("featured_until")
+    is_featured = bool(featured_until and featured_until > now_iso)
     return {
         "id": e["id"],
         "title": e["title"],
@@ -191,6 +199,8 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
         "organizer_name": e.get("organizer_name", "Organizer"),
         "booked_count": e.get("booked_count", 0),
         "distance_km": distance_km,
+        "is_featured": is_featured,
+        "featured_until": featured_until,
         "created_at": e["created_at"],
     }
 
@@ -271,11 +281,15 @@ async def list_events(
             if distance > radius_km:
                 continue
         results.append(event_doc_to_out(e, distance))
-    # Sort by distance if available, otherwise by date
-    if lat is not None and lng is not None:
-        results.sort(key=lambda x: x["distance_km"] if x["distance_km"] is not None else 9999)
-    else:
-        results.sort(key=lambda x: x["date"])
+    # Sort: featured first, then by distance/date
+    def sort_key(x):
+        featured_rank = 0 if x.get("is_featured") else 1
+        if lat is not None and lng is not None:
+            secondary = x["distance_km"] if x.get("distance_km") is not None else 9999
+        else:
+            secondary = x["date"]
+        return (featured_rank, secondary)
+    results.sort(key=sort_key)
     return results
 
 @api_router.get("/events/{event_id}", response_model=EventOut)
@@ -396,11 +410,14 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
         event_id=body.event_id,
         event=EventOut(**event_doc_to_out(event)),
         user_id=user["id"],
+        user_name=user.get("name"),
         seats=body.seats,
         num_seats=body.num_seats,
         time_slot=body.time_slot,
         total_price=total_price,
         status="confirmed",
+        checked_in=False,
+        checked_in_at=None,
         created_at=doc["created_at"],
     )
 
@@ -416,11 +433,14 @@ async def my_bookings(user=Depends(get_current_user)):
             event_id=b["event_id"],
             event=EventOut(**event_doc_to_out(event)) if event else None,
             user_id=b["user_id"],
+            user_name=user.get("name"),
             seats=b.get("seats"),
             num_seats=b.get("num_seats"),
             time_slot=b.get("time_slot"),
             total_price=b.get("total_price", 0),
             status=b.get("status", "confirmed"),
+            checked_in=b.get("checked_in", False),
+            checked_in_at=b.get("checked_in_at"),
             created_at=b["created_at"],
         ))
     return out
@@ -432,6 +452,92 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Booking not found")
     await db.bookings.update_one({"id": booking_id}, {"$set": {"status": "cancelled"}})
     return {"ok": True}
+
+# ---------- Feature/Boost ----------
+
+FEATURE_TIERS = {
+    "24h": {"hours": 24, "price": 4.99, "label": "1 Day Boost"},
+    "7d": {"hours": 24 * 7, "price": 14.99, "label": "7 Day Boost"},
+    "30d": {"hours": 24 * 30, "price": 39.99, "label": "30 Day Boost"},
+}
+
+class BoostRequest(BaseModel):
+    tier: Literal["24h", "7d", "30d"]
+
+@api_router.get("/events/{event_id}/feature-tiers")
+async def get_feature_tiers(event_id: str):
+    return FEATURE_TIERS
+
+@api_router.post("/events/{event_id}/feature")
+async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_role("organizer"))):
+    e = await db.events.find_one({"id": event_id})
+    if not e:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if e["organizer_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Not your event")
+    tier = FEATURE_TIERS[body.tier]
+    now = datetime.now(timezone.utc)
+    current_until = e.get("featured_until")
+    base = now
+    if current_until:
+        try:
+            existing = datetime.fromisoformat(current_until)
+            if existing > now:
+                base = existing
+        except Exception:
+            pass
+    new_until = base + timedelta(hours=tier["hours"])
+    await db.events.update_one(
+        {"id": event_id},
+        {"$set": {"featured_until": new_until.isoformat()}},
+    )
+    return {
+        "ok": True,
+        "featured_until": new_until.isoformat(),
+        "tier": body.tier,
+        "amount_charged": tier["price"],
+    }
+
+# ---------- Check-in (QR) ----------
+
+class CheckInRequest(BaseModel):
+    booking_id: str
+
+@api_router.post("/checkin")
+async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organizer"))):
+    b = await db.bookings.find_one({"id": body.booking_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    event = await db.events.find_one({"id": b["event_id"]}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event["organizer_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="This ticket belongs to a different organizer")
+    if b.get("status") == "cancelled":
+        raise HTTPException(status_code=400, detail="This booking was cancelled")
+    if b.get("checked_in"):
+        return {
+            "ok": True,
+            "already_checked_in": True,
+            "booking": b,
+            "event_title": event["title"],
+            "checked_in_at": b.get("checked_in_at"),
+        }
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.bookings.update_one(
+        {"id": body.booking_id},
+        {"$set": {"checked_in": True, "checked_in_at": now_iso, "status": "checked_in"}},
+    )
+    # Look up attendee name
+    attendee = await db.users.find_one({"id": b["user_id"]}, {"_id": 0})
+    return {
+        "ok": True,
+        "already_checked_in": False,
+        "booking": {**b, "checked_in": True, "checked_in_at": now_iso, "status": "checked_in"},
+        "event_title": event["title"],
+        "attendee_name": attendee.get("name") if attendee else None,
+        "checked_in_at": now_iso,
+    }
 
 # ---------- Analytics ----------
 
@@ -445,13 +551,20 @@ async def organizer_analytics(user=Depends(require_role("organizer"))):
 
     total_revenue = sum(b.get("total_price", 0) for b in bookings)
     total_tickets = 0
+    checked_in_tickets = 0
     for b in bookings:
         if b.get("seats"):
             total_tickets += len(b["seats"])
+            if b.get("checked_in"):
+                checked_in_tickets += len(b["seats"])
         elif b.get("num_seats"):
             total_tickets += b["num_seats"]
+            if b.get("checked_in"):
+                checked_in_tickets += b["num_seats"]
         else:
             total_tickets += 1
+            if b.get("checked_in"):
+                checked_in_tickets += 1
     total_events = len(events)
 
     # Per-event breakdown
@@ -484,6 +597,7 @@ async def organizer_analytics(user=Depends(require_role("organizer"))):
     return {
         "total_revenue": total_revenue,
         "total_tickets": total_tickets,
+        "checked_in_tickets": checked_in_tickets,
         "total_events": total_events,
         "unique_attendees": len(set(b["user_id"] for b in bookings)),
         "per_event": per_event,

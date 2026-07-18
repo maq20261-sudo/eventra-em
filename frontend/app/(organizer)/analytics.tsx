@@ -9,6 +9,7 @@ import { colors, spacing, radius, shadows } from "@/src/theme";
 type AnalyticsData = {
   total_revenue: number;
   total_tickets: number;
+  checked_in_tickets?: number;
   total_events: number;
   unique_attendees: number;
   per_event: { event_id: string; title: string; revenue: number; tickets: number; date: string }[];
@@ -71,6 +72,12 @@ export default function Analytics() {
             label="Tickets Sold"
             value={String(data?.total_tickets || 0)}
             testID="kpi-tickets"
+          />
+          <KPICard
+            icon="checkmark-done-outline"
+            label="Checked In"
+            value={String(data?.checked_in_tickets || 0)}
+            testID="kpi-checkedin"
           />
           <KPICard
             icon="calendar-outline"

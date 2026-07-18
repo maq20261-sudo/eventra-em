@@ -99,7 +99,7 @@ export default function MyBookings() {
               key={b.id}
               testID={`booking-card-${b.id}`}
               style={styles.card}
-              onPress={() => router.push(`/event/${b.event_id}` as any)}
+              onPress={() => router.push(`/ticket/${b.id}` as any)}
             >
               <View style={styles.top}>
                 <Image source={b.event?.image_url} style={styles.thumb} contentFit="cover" />
