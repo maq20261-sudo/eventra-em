@@ -50,7 +50,7 @@ export default function MyBookings() {
   const now = new Date();
   const filtered = bookings.filter((b) => {
     if (!b.event) return false;
-    if (b.status !== "confirmed") return tab === "completed";
+    if (b.status === "cancelled") return tab === "completed";
     const isPast = new Date(b.event.date) < now;
     return tab === "upcoming" ? !isPast : isPast;
   });

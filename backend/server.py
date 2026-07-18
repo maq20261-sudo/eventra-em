@@ -324,7 +324,7 @@ async def delete_event(event_id: str, user=Depends(require_role("organizer"))):
 
 @api_router.get("/events/{event_id}/booked-seats")
 async def get_booked_seats(event_id: str):
-    bookings = await db.bookings.find({"event_id": event_id, "status": "confirmed"}, {"_id": 0}).to_list(1000)
+    bookings = await db.bookings.find({"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
     booked_seats = []
     booked_slots = []
     total_general = 0
@@ -359,7 +359,7 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
     if event["booking_type"] == "seat_map":
         if not body.seats:
             raise HTTPException(status_code=400, detail="Please select seats")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": "confirmed"}, {"_id": 0}).to_list(1000)
+        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
         taken = set()
         for b in existing:
             if b.get("seats"):
@@ -372,7 +372,7 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
     elif event["booking_type"] == "general":
         if not body.num_seats or body.num_seats < 1:
             raise HTTPException(status_code=400, detail="Please choose number of seats")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": "confirmed"}, {"_id": 0}).to_list(1000)
+        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
         booked = sum(b.get("num_seats", 0) for b in existing)
         if booked + body.num_seats > (event.get("total_seats") or 0):
             raise HTTPException(status_code=400, detail="Not enough seats available")
@@ -381,7 +381,7 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
     elif event["booking_type"] == "time_slot":
         if not body.time_slot:
             raise HTTPException(status_code=400, detail="Please pick a time slot")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": "confirmed"}, {"_id": 0}).to_list(1000)
+        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
         taken_slots = {b.get("time_slot") for b in existing}
         if body.time_slot in taken_slots:
             raise HTTPException(status_code=400, detail="Time slot already booked")
@@ -546,7 +546,7 @@ async def organizer_analytics(user=Depends(require_role("organizer"))):
     events = await db.events.find({"organizer_id": user["id"]}, {"_id": 0}).to_list(500)
     event_ids = [e["id"] for e in events]
     bookings = await db.bookings.find(
-        {"event_id": {"$in": event_ids}, "status": "confirmed"}, {"_id": 0}
+        {"event_id": {"$in": event_ids}, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}
     ).to_list(5000)
 
     total_revenue = sum(b.get("total_price", 0) for b in bookings)
