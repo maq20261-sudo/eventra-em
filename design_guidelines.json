@@ -1,0 +1,195 @@
+{
+  "app_name": "GatherSpace",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A highly refined, content-first interface that frames event imagery perfectly with crisp typography and subtle botanical green accents.",
+  "color": {
+    "surface": "#F9FAFB",
+    "onSurface": "#111827",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#111827",
+    "surfaceTertiary": "#F3F4F6",
+    "onSurfaceTertiary": "#374151",
+    "surfaceInverse": "#1F2937",
+    "onSurfaceInverse": "#F9FAFB",
+    "brand": "#059669",
+    "brandPrimary": "#059669",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#10B981",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#D1FAE5",
+    "onBrandTertiary": "#065F46",
+    "success": "#059669",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D97706",
+    "onWarning": "#FFFFFF",
+    "error": "#DC2626",
+    "onError": "#FFFFFF",
+    "info": "#4B5563",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7EB",
+    "borderStrong": "#D1D5DB",
+    "divider": "#F3F4F6"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical breathing room. Cards never flush to screen edge. Intentionally pad around content.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Use glass for sticky header over event lists.",
+      "Use glass for bottom tab bar.",
+      "Use frosted glass overlay on hero cards with brand tint.",
+      "Use glass on floating bottom CTA in event details."
+    ],
+    "dont's": [
+      "Never blur form fields.",
+      "Never blur body text regions."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Onboarding_Auth",
+      "purpose": "Guides the user to pick their role (Consumer or Organizer) and authenticate.",
+      "states": {
+        "loading": "Centered spinner",
+        "empty": "N/A",
+        "error": "Error toast on failed login"
+      },
+      "layout": "Full-bleed background image with vertical linear gradient scrim (transparent to >=70% surfaceInverse) to guarantee text contrast. Logo at the top, bottom-anchored content with two primary brand buttons for role selection. Minimal UI chrome."
+    },
+    {
+      "name": "Discover",
+      "purpose": "Consumer feed to browse nearby events based on geo-location.",
+      "states": {
+        "loading": "Skeleton event cards",
+        "empty": "Illustration + 'No events within your radius' + CTA to expand radius",
+        "error": "Failed to load events + Retry button"
+      },
+      "layout": "Sticky top header (glassmorphism) containing a 'Current Location & Radius (e.g. 10km)' dropdown trigger and horizontal filter chips (Music, Art, Tech). Below, a single-column scrollable list of large event cards. Each card uses 'width: 100%' within lg horizontal padding, featuring a prominent hero image, date/time, and title."
+    },
+    {
+      "name": "Event_Detail",
+      "purpose": "In-depth view of a specific event before booking.",
+      "states": {
+        "loading": "Skeleton layout",
+        "empty": "N/A",
+        "error": "Failed to fetch details + Retry"
+      },
+      "layout": "Parallax hero image at the top. Body content with generous lg/xl padding: Title, date/time, organizer info block (using initials avatar or logo), location map preview. Must include a sticky primary CTA at the bottom ('Select Seats' or 'Book Now') inside a glass container, allowing the content to scroll smoothly underneath."
+    },
+    {
+      "name": "Seat_Selection",
+      "purpose": "Allows users to pick specific seats from a venue map.",
+      "states": {
+        "loading": "Spinner centered on map area",
+        "empty": "N/A",
+        "error": "Failed to load seat layout + Retry"
+      },
+      "layout": "Sticky top header with Legend (Available, Selected, Unavailable). The core is a 2D interactive grid wrapped in a bi-directional (horizontal & vertical) ScrollView, allowing panning and zooming. Seats are colored based on state (White for available, brandPrimary for selected, surfaceTertiary for unavailable). Sticky bottom glass bar summarizing selected seats count and 'Proceed to Pay' CTA."
+    },
+    {
+      "name": "My_Bookings",
+      "purpose": "Consumer view of upcoming and completed event tickets.",
+      "states": {
+        "loading": "Skeleton cards",
+        "empty": "Illustration + 'No upcoming events' + 'Discover' CTA",
+        "error": "Failed to load bookings + Retry"
+      },
+      "layout": "Top segmented control (Upcoming / Completed). List of ticket cards. Ticket cards have a distinct UI (e.g., dotted divider line and subtle semi-circle cutouts on the left/right edges) to feel tactile and 'real'."
+    },
+    {
+      "name": "Organizer_Create_Event",
+      "purpose": "Form for organizers to create or update an event.",
+      "states": {
+        "loading": "Spinner during submission",
+        "empty": "N/A",
+        "error": "Validation error text below inputs"
+      },
+      "layout": "Standard single-column form with labels above inputs. Includes segmented controls for 'Booking Type' (Seat Map, General Admission, Time Slots). Bottom sticky 'Publish Event' button inside KeyboardAvoidingView."
+    },
+    {
+      "name": "Organizer_Analytics",
+      "purpose": "Dashboard for organizers to track sales, attendance, and event health.",
+      "states": {
+        "loading": "Skeleton grid",
+        "empty": "Illustration + 'No data yet' for new events",
+        "error": "Failed to load analytics + Retry"
+      },
+      "layout": "Card-based responding layout. Top 'Key Metrics' 2-col grid (Revenue, Tickets Sold, Page Views). Below, a modular card containing a Donut Chart for 'Ticket Types' breakdown. Interactive tabs to switch between All, First-Time, and Returning attendees."
+    }
+  ],
+  "images": {
+    "auth_bg": {
+      "url": "https://images.pexels.com/photos/894557/pexels-photo-894557.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Concert crowd silhouette stadium"
+    },
+    "event_art": {
+      "url": "https://images.pexels.com/photos/15086258/pexels-photo-15086258.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "People in an art gallery exhibition"
+    },
+    "event_tech": {
+      "url": "https://images.pexels.com/photos/29180747/pexels-photo-29180747.jpeg",
+      "alt": "Modern tech conference speaker"
+    },
+    "event_dj": {
+      "url": "https://images.pexels.com/photos/10781266/pexels-photo-10781266.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Nightclub DJ party lights"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette provided. Use the Emerald hue (#059669) for the primary brand moments.",
+    "Implement the gradient scrim pattern (transparent to >=70% surfaceInverse) on all text over imagery (e.g., Onboarding auth background, Event detail hero). This is a zero-tolerance rule.",
+    "Do NOT use any blue, indigo, purple, or orange colors. Stick to the provided palette.",
+    "No emojis anywhere in the app UI.",
+    "Use Phosphor icons consistently. Ensure they are the same weight throughout (e.g., Outline or Regular).",
+    "For the Seat Selection map, ensure the grid is wrapped inside a scroll view that allows both horizontal and vertical scrolling to accommodate large venue maps.",
+    "Include haptics on primary actions (buttons, toggles, seat tap selections). Serialize them appropriately.",
+    "Ensure the sticky CTAs at the bottom of screens (Event Details, Create Event) are placed outside the main ScrollView and utilize a safe-area bottom inset, with a background surface (preferably glass)."
+  ],
+  "haptics": {
+    "button_primary_press": "impactLight",
+    "tab_switch": "selection",
+    "seat_select": "impactMedium",
+    "filter_chip_toggle": "impactLight",
+    "form_submit_success": "notificationSuccess"
+  }
+}
