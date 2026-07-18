@@ -92,6 +92,13 @@ export const api = {
   checkIn: (bookingId: string) =>
     request(`/checkin`, { method: "POST", body: JSON.stringify({ booking_id: bookingId }) }, true),
 
+  // Payments (Razorpay)
+  paymentConfig: () => request(`/payments/config`, { method: "GET" }),
+  createPaymentOrder: (body: any) =>
+    request(`/payments/order`, { method: "POST", body: JSON.stringify(body) }, true),
+  verifyPayment: (body: any) =>
+    request(`/payments/verify`, { method: "POST", body: JSON.stringify(body) }, true),
+
   // Analytics
   organizerAnalytics: () => request("/analytics/organizer", { method: "GET" }, true),
 };

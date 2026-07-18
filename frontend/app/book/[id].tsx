@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
+import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 const SEAT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -26,6 +27,8 @@ export default function Booking() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rzpOrder, setRzpOrder] = useState<RzpOrder | null>(null);
+  const [rzpVisible, setRzpVisible] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -66,6 +69,34 @@ export default function Booking() {
     setError(null);
     setSubmitting(true);
     try {
+      if (event.price > 0 && totalPrice > 0) {
+        // Try to create a Razorpay order
+        try {
+          const order = await api.createPaymentOrder({
+            kind: "booking",
+            event_id: String(id),
+            seats: event.booking_type === "seat_map" ? selectedSeats : undefined,
+            num_seats: event.booking_type === "general" ? numSeats : undefined,
+            time_slot: event.booking_type === "time_slot" ? slot : undefined,
+          });
+          setRzpOrder(order as any);
+          setRzpVisible(true);
+          setSubmitting(false);
+          return;
+        } catch (payErr: any) {
+          // Payments not configured or gateway error → offer pay-at-venue fallback
+          const msg = payErr?.message || "";
+          if (msg.includes("not configured") || msg.includes("503")) {
+            // Fall back silently to pay-at-venue
+          } else {
+            setError(msg);
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+
+      // Pay at venue / free
       const body: any = { event_id: String(id) };
       if (event.booking_type === "seat_map") body.seats = selectedSeats;
       if (event.booking_type === "general") body.num_seats = numSeats;
@@ -78,6 +109,22 @@ export default function Booking() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePaymentSuccess = async (payload: any) => {
+    setRzpVisible(false);
+    setSubmitting(true);
+    try {
+      const res = await api.verifyPayment(payload);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSuccess(res.result.booking);
+    } catch (e: any) {
+      setError(e?.message || "Payment verification failed");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setSubmitting(false);
+      setRzpOrder(null);
     }
   };
 
@@ -152,8 +199,10 @@ export default function Booking() {
           >
             {submitting ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
               <>
-                <Text style={styles.ctaText}>Confirm Booking</Text>
-                <Ionicons name="checkmark-circle" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.ctaText}>
+                  {totalPrice > 0 ? "Pay & Confirm" : "Confirm Booking"}
+                </Text>
+                <Ionicons name={totalPrice > 0 ? "card" : "checkmark-circle"} size={18} color={colors.onBrandPrimary} />
               </>
             )}
           </Pressable>
@@ -189,6 +238,14 @@ export default function Booking() {
           </View>
         </View>
       </Modal>
+
+      <RazorpayCheckout
+        visible={rzpVisible}
+        order={rzpOrder}
+        onSuccess={handlePaymentSuccess}
+        onCancel={() => { setRzpVisible(false); setRzpOrder(null); }}
+        onError={(msg) => { setRzpVisible(false); setError(msg); setRzpOrder(null); }}
+      />
     </SafeAreaView>
   );
 }

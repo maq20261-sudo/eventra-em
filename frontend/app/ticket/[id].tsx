@@ -130,11 +130,19 @@ export default function TicketScreen() {
               <Text style={styles.bookingId} testID="ticket-id">ID · {booking.id.slice(0, 8).toUpperCase()}</Text>
             </View>
 
-            {booking.total_price > 0 && !booking.checked_in && booking.status !== "cancelled" && (
+            {booking.total_price > 0 && !booking.checked_in && booking.status !== "cancelled" && booking.payment_status !== "paid" && (
               <View style={styles.notice}>
                 <Ionicons name="wallet-outline" size={16} color={colors.warning} />
                 <Text style={styles.noticeText}>
                   Pay ${booking.total_price.toFixed(2)} at the venue when scanned
+                </Text>
+              </View>
+            )}
+            {booking.payment_status === "paid" && (
+              <View style={styles.paidNotice}>
+                <Ionicons name="shield-checkmark" size={16} color={colors.brand} />
+                <Text style={styles.paidNoticeText}>
+                  Paid online · No payment needed at venue
                 </Text>
               </View>
             )}
@@ -214,4 +222,11 @@ const styles = StyleSheet.create({
     padding: spacing.md, borderRadius: radius.md,
   },
   noticeText: { fontSize: 13, color: "#92400E", flex: 1, fontWeight: "500" },
+  paidNotice: {
+    marginTop: spacing.md,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.brandTertiary,
+    padding: spacing.md, borderRadius: radius.md,
+  },
+  paidNoticeText: { fontSize: 13, color: colors.onBrandTertiary, flex: 1, fontWeight: "500" },
 });

@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
+import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
 type Event = {
@@ -29,6 +30,9 @@ export default function OrganizerEvents() {
   const [boostEvent, setBoostEvent] = useState<Event | null>(null);
   const [boostLoading, setBoostLoading] = useState<string | null>(null);
   const [boostSuccess, setBoostSuccess] = useState<string | null>(null);
+  const [rzpOrder, setRzpOrder] = useState<RzpOrder | null>(null);
+  const [rzpVisible, setRzpVisible] = useState(false);
+  const [boostError, setBoostError] = useState<string | null>(null);
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -55,10 +59,34 @@ export default function OrganizerEvents() {
   const runBoost = async (tier: "24h" | "7d" | "30d") => {
     if (!boostEvent) return;
     setBoostLoading(tier);
+    setBoostError(null);
     try {
+      // Try Razorpay checkout first
+      try {
+        const order = await api.createPaymentOrder({
+          kind: "boost",
+          boost_event_id: boostEvent.id,
+          tier,
+        });
+        setRzpOrder(order as any);
+        setRzpVisible(true);
+        setBoostLoading(null);
+        return;
+      } catch (payErr: any) {
+        const msg = payErr?.message || "";
+        if (msg.includes("not configured") || msg.includes("503")) {
+          // fall through to simulated boost
+        } else {
+          setBoostError(msg);
+          setBoostLoading(null);
+          return;
+        }
+      }
+
+      // Simulated boost (payments not configured)
       const res = await api.featureEvent(boostEvent.id, tier);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setBoostSuccess(`Boosted for $${res.amount_charged.toFixed(2)}!`);
+      setBoostSuccess(`Boosted for $${res.amount_charged.toFixed(2)} (simulated)`);
       setBoostEvent(null);
       await load();
       setTimeout(() => setBoostSuccess(null), 2500);
@@ -66,6 +94,23 @@ export default function OrganizerEvents() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setBoostLoading(null);
+    }
+  };
+
+  const handleBoostPaymentSuccess = async (payload: any) => {
+    setRzpVisible(false);
+    try {
+      const verify = await api.verifyPayment(payload);
+      const amt = verify?.result?.amount_charged || 0;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setBoostSuccess(`Boosted for $${amt.toFixed(2)}!`);
+      setBoostEvent(null);
+      await load();
+      setTimeout(() => setBoostSuccess(null), 2500);
+    } catch (e: any) {
+      setBoostError(e?.message || "Payment verification failed");
+    } finally {
+      setRzpOrder(null);
     }
   };
 
@@ -209,7 +254,9 @@ export default function OrganizerEvents() {
               </Pressable>
             ))}
             <Text style={styles.boostFine}>
-              Simulated payment for MVP. Integrate a payment gateway before going live.
+              {boostError
+                ? boostError
+                : "Powered by Razorpay · secure test-mode checkout"}
             </Text>
           </Pressable>
         </Pressable>
@@ -222,6 +269,14 @@ export default function OrganizerEvents() {
           <Text style={styles.toastText}>{boostSuccess}</Text>
         </View>
       )}
+
+      <RazorpayCheckout
+        visible={rzpVisible}
+        order={rzpOrder}
+        onSuccess={handleBoostPaymentSuccess}
+        onCancel={() => { setRzpVisible(false); setRzpOrder(null); }}
+        onError={(msg) => { setRzpVisible(false); setRzpOrder(null); setBoostError(msg); }}
+      />
     </SafeAreaView>
   );
 }

@@ -6,13 +6,16 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import math
+import hmac
+import hashlib
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Any, Dict
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
+import razorpay
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -24,6 +27,13 @@ db = client[os.environ['DB_NAME']]
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "gatherspace-secret-key-change-me-in-prod")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_placeholder")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "placeholder_secret")
+_RZP_CONFIGURED = not (
+    RAZORPAY_KEY_ID.endswith("placeholder") or RAZORPAY_KEY_SECRET.endswith("placeholder_secret")
+)
+rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -125,6 +135,7 @@ class BookingOut(BaseModel):
     time_slot: Optional[str] = None
     total_price: float
     status: str  # confirmed / cancelled / checked_in
+    payment_status: str = "free"  # paid / unpaid / free
     checked_in: bool = False
     checked_in_at: Optional[str] = None
     created_at: str
@@ -349,8 +360,7 @@ async def my_events(user=Depends(require_role("organizer"))):
 
 # ---------- Booking Routes ----------
 
-@api_router.post("/bookings", response_model=BookingOut)
-async def create_booking(body: BookingCreate, user=Depends(require_role("consumer"))):
+async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Dict[str, Any]] = None) -> BookingOut:
     event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -400,6 +410,8 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
         "time_slot": body.time_slot,
         "total_price": total_price,
         "status": "confirmed",
+        "payment_status": "paid" if payment else ("unpaid" if total_price > 0 else "free"),
+        "payment": payment,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.bookings.insert_one(doc)
@@ -416,10 +428,16 @@ async def create_booking(body: BookingCreate, user=Depends(require_role("consume
         time_slot=body.time_slot,
         total_price=total_price,
         status="confirmed",
+        payment_status=doc["payment_status"],
         checked_in=False,
         checked_in_at=None,
         created_at=doc["created_at"],
     )
+
+@api_router.post("/bookings", response_model=BookingOut)
+async def create_booking(body: BookingCreate, user=Depends(require_role("consumer"))):
+    # Pay-at-venue path (no gateway). For paid events without payment info, mark unpaid.
+    return await _perform_booking(body, user, payment=None)
 
 @api_router.get("/bookings/me", response_model=List[BookingOut])
 async def my_bookings(user=Depends(get_current_user)):
@@ -428,6 +446,9 @@ async def my_bookings(user=Depends(get_current_user)):
     out = []
     for b in bookings:
         event = await db.events.find_one({"id": b["event_id"]}, {"_id": 0})
+        payment_status = b.get("payment_status")
+        if not payment_status:
+            payment_status = "free" if b.get("total_price", 0) == 0 else "unpaid"
         out.append(BookingOut(
             id=b["id"],
             event_id=b["event_id"],
@@ -439,6 +460,7 @@ async def my_bookings(user=Depends(get_current_user)):
             time_slot=b.get("time_slot"),
             total_price=b.get("total_price", 0),
             status=b.get("status", "confirmed"),
+            payment_status=payment_status,
             checked_in=b.get("checked_in", False),
             checked_in_at=b.get("checked_in_at"),
             created_at=b["created_at"],
@@ -468,14 +490,15 @@ class BoostRequest(BaseModel):
 async def get_feature_tiers(event_id: str):
     return FEATURE_TIERS
 
-@api_router.post("/events/{event_id}/feature")
-async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_role("organizer"))):
+async def _apply_boost(event_id: str, user: dict, tier: str, payment: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     e = await db.events.find_one({"id": event_id})
     if not e:
         raise HTTPException(status_code=404, detail="Event not found")
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
-    tier = FEATURE_TIERS[body.tier]
+    if tier not in FEATURE_TIERS:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    t = FEATURE_TIERS[tier]
     now = datetime.now(timezone.utc)
     current_until = e.get("featured_until")
     base = now
@@ -486,17 +509,22 @@ async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_
                 base = existing
         except Exception:
             pass
-    new_until = base + timedelta(hours=tier["hours"])
-    await db.events.update_one(
-        {"id": event_id},
-        {"$set": {"featured_until": new_until.isoformat()}},
-    )
+    new_until = base + timedelta(hours=t["hours"])
+    update: Dict[str, Any] = {"featured_until": new_until.isoformat()}
+    if payment:
+        update["last_boost_payment"] = payment
+    await db.events.update_one({"id": event_id}, {"$set": update})
     return {
         "ok": True,
         "featured_until": new_until.isoformat(),
-        "tier": body.tier,
-        "amount_charged": tier["price"],
+        "tier": tier,
+        "amount_charged": t["price"],
     }
+
+@api_router.post("/events/{event_id}/feature")
+async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_role("organizer"))):
+    # Simulated (no payment) — kept for backward compat / dev testing.
+    return await _apply_boost(event_id, user, body.tier, payment=None)
 
 # ---------- Check-in (QR) ----------
 
@@ -538,6 +566,205 @@ async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organ
         "attendee_name": attendee.get("name") if attendee else None,
         "checked_in_at": now_iso,
     }
+
+# ---------- Payments (Razorpay) ----------
+
+class PaymentOrderCreate(BaseModel):
+    kind: Literal["booking", "boost"]
+    # For kind=booking
+    event_id: Optional[str] = None
+    seats: Optional[List[str]] = None
+    num_seats: Optional[int] = None
+    time_slot: Optional[str] = None
+    # For kind=boost
+    boost_event_id: Optional[str] = None
+    tier: Optional[Literal["24h", "7d", "30d"]] = None
+
+class PaymentVerify(BaseModel):
+    intent_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+def _rzp_available() -> bool:
+    return _RZP_CONFIGURED
+
+def _compute_booking_amount(event: dict, seats: Optional[List[str]], num_seats: Optional[int], time_slot: Optional[str]) -> float:
+    bt = event["booking_type"]
+    if bt == "seat_map":
+        if not seats:
+            raise HTTPException(status_code=400, detail="Please select seats")
+        return event["price"] * len(seats)
+    if bt == "general":
+        if not num_seats or num_seats < 1:
+            raise HTTPException(status_code=400, detail="Please choose number of seats")
+        return event["price"] * num_seats
+    if bt == "time_slot":
+        if not time_slot:
+            raise HTTPException(status_code=400, detail="Please pick a time slot")
+        return event["price"]
+    raise HTTPException(status_code=400, detail="Invalid booking type")
+
+@api_router.get("/payments/config")
+async def payment_config():
+    return {
+        "provider": "razorpay",
+        "key_id": RAZORPAY_KEY_ID if _rzp_available() else "",
+        "configured": _rzp_available(),
+        "currency": "INR",
+        "usd_to_inr": 83,
+    }
+
+@api_router.post("/payments/order")
+async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_current_user)):
+    if not _rzp_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Payments are not configured. Ask the app owner to add Razorpay test keys to backend .env (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET).",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if body.kind == "booking":
+        if user["role"] != "consumer":
+            raise HTTPException(status_code=403, detail="Consumers only")
+        if not body.event_id:
+            raise HTTPException(status_code=400, detail="event_id required")
+        event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        amount_usd = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
+        if amount_usd <= 0:
+            raise HTTPException(status_code=400, detail="Free event — no payment needed")
+        amount_inr = int(round(amount_usd * 83))  # convert USD → INR
+        amount_paise = amount_inr * 100
+        description = f"Booking · {event['title']}"
+
+    elif body.kind == "boost":
+        if user["role"] != "organizer":
+            raise HTTPException(status_code=403, detail="Organizers only")
+        if not body.boost_event_id or not body.tier:
+            raise HTTPException(status_code=400, detail="boost_event_id and tier required")
+        ev = await db.events.find_one({"id": body.boost_event_id})
+        if not ev:
+            raise HTTPException(status_code=404, detail="Event not found")
+        if ev["organizer_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="Not your event")
+        tier_cfg = FEATURE_TIERS[body.tier]
+        amount_usd = float(tier_cfg["price"])
+        amount_inr = int(round(amount_usd * 83))
+        amount_paise = amount_inr * 100
+        description = f"{tier_cfg['label']} · {ev['title']}"
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+
+    intent_id = str(uuid.uuid4())
+    try:
+        rzp_order = rzp_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": intent_id[:40],
+            "notes": {"kind": body.kind, "intent_id": intent_id},
+        })
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.error("Razorpay order create failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {exc}")
+
+    intent_doc = {
+        "id": intent_id,
+        "user_id": user["id"],
+        "kind": body.kind,
+        "payload": body.model_dump(),
+        "amount_paise": amount_paise,
+        "amount_inr": amount_inr,
+        "amount_usd": amount_usd,
+        "razorpay_order_id": rzp_order["id"],
+        "status": "created",
+        "description": description,
+        "created_at": now_iso,
+    }
+    await db.payment_intents.insert_one(intent_doc)
+
+    return {
+        "intent_id": intent_id,
+        "razorpay_order_id": rzp_order["id"],
+        "razorpay_key_id": RAZORPAY_KEY_ID,
+        "amount_paise": amount_paise,
+        "amount_inr": amount_inr,
+        "amount_usd": amount_usd,
+        "currency": "INR",
+        "description": description,
+        "prefill": {
+            "name": user.get("name", ""),
+            "email": user.get("email", ""),
+        },
+    }
+
+@api_router.post("/payments/verify")
+async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
+    intent = await db.payment_intents.find_one({"id": body.intent_id}, {"_id": 0})
+    if not intent:
+        raise HTTPException(status_code=404, detail="Payment intent not found")
+    if intent["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Not your payment")
+    if intent["razorpay_order_id"] != body.razorpay_order_id:
+        raise HTTPException(status_code=400, detail="Order id mismatch")
+    if intent["status"] == "paid":
+        # Idempotent: return existing result
+        return {"ok": True, "already_paid": True, "result": intent.get("result")}
+
+    # Verify signature
+    expected = hmac.new(
+        RAZORPAY_KEY_SECRET.encode("utf-8"),
+        f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, body.razorpay_signature):
+        await db.payment_intents.update_one(
+            {"id": body.intent_id},
+            {"$set": {"status": "signature_failed"}},
+        )
+        raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    payment_info = {
+        "provider": "razorpay",
+        "order_id": body.razorpay_order_id,
+        "payment_id": body.razorpay_payment_id,
+        "amount_paise": intent["amount_paise"],
+        "amount_inr": intent["amount_inr"],
+        "amount_usd": intent["amount_usd"],
+        "paid_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    kind = intent["kind"]
+    payload = intent["payload"]
+    result: Dict[str, Any]
+    if kind == "booking":
+        booking_body = BookingCreate(
+            event_id=payload["event_id"],
+            seats=payload.get("seats"),
+            num_seats=payload.get("num_seats"),
+            time_slot=payload.get("time_slot"),
+        )
+        booking = await _perform_booking(booking_body, user, payment=payment_info)
+        result = {"kind": "booking", "booking": booking.model_dump()}
+    elif kind == "boost":
+        boost_res = await _apply_boost(payload["boost_event_id"], user, payload["tier"], payment=payment_info)
+        result = {"kind": "boost", **boost_res}
+    else:
+        raise HTTPException(status_code=400, detail="Unknown intent kind")
+
+    await db.payment_intents.update_one(
+        {"id": body.intent_id},
+        {"$set": {
+            "status": "paid",
+            "payment": payment_info,
+            "result": result,
+        }},
+    )
+    return {"ok": True, "already_paid": False, "result": result}
 
 # ---------- Analytics ----------
 

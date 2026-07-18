@@ -178,7 +178,13 @@ export default function Scanner() {
                   : result.booking.time_slot || ""}
               </Text>
             )}
-            {result?.booking?.total_price > 0 && !result.already_checked_in && (
+            {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status === "paid" && (
+              <View style={styles.paidPill}>
+                <Ionicons name="shield-checkmark" size={14} color={colors.brand} />
+                <Text style={styles.paidText}>Paid online · ${result.booking.total_price.toFixed(2)}</Text>
+              </View>
+            )}
+            {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status !== "paid" && (
               <View style={styles.payPill}>
                 <Ionicons name="wallet-outline" size={14} color={colors.warning} />
                 <Text style={styles.payText}>Collect ${result.booking.total_price.toFixed(2)} at venue</Text>
@@ -275,6 +281,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill, marginTop: spacing.md,
   },
   payText: { color: "#92400E", fontSize: 13, fontWeight: "600" },
+  paidPill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandTertiary, paddingHorizontal: spacing.md, paddingVertical: 8,
+    borderRadius: radius.pill, marginTop: spacing.md,
+  },
+  paidText: { color: colors.onBrandTertiary, fontSize: 13, fontWeight: "600" },
   errorText: { color: colors.error, fontSize: 14, textAlign: "center", marginTop: 4 },
   scanBtn: {
     marginTop: spacing.md,
