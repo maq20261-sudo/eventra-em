@@ -116,7 +116,7 @@ export default function TicketScreen() {
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={styles.smallLabel}>Total</Text>
                 <Text style={styles.priceValue}>
-                  {booking.total_price > 0 ? `$${booking.total_price.toFixed(2)}` : "Free"}
+                  {booking.total_price > 0 ? `₹${booking.total_price.toFixed(0)}` : "Free"}
                 </Text>
               </View>
             </View>
@@ -138,7 +138,7 @@ export default function TicketScreen() {
               <View style={styles.notice}>
                 <Ionicons name="wallet-outline" size={16} color={colors.warning} />
                 <Text style={styles.noticeText}>
-                  Pay ${booking.total_price.toFixed(2)} at the venue when scanned
+                  Pay ₹{booking.total_price.toFixed(0)} at the venue when scanned
                 </Text>
               </View>
             )}

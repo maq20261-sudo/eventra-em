@@ -124,7 +124,7 @@ export default function EventDetail() {
             </View>
             <View style={styles.infoBlock}>
               <Text style={styles.infoLabel}>Price</Text>
-              <Text style={styles.infoValue}>{event.price > 0 ? `$${event.price.toFixed(2)}` : "Free"}</Text>
+              <Text style={styles.infoValue}>{event.price > 0 ? `₹${event.price.toFixed(0)}` : "Free"}</Text>
             </View>
           </View>
 
@@ -147,7 +147,7 @@ export default function EventDetail() {
           <View>
             <Text style={styles.stickyPriceLabel}>Starting at</Text>
             <Text style={styles.stickyPrice}>
-              {event.price > 0 ? `$${event.price.toFixed(2)}` : "Free"}
+              {event.price > 0 ? `₹${event.price.toFixed(0)}` : "Free"}
             </Text>
           </View>
           {isOwner ? (

@@ -332,7 +332,7 @@ export default function EventForm({ editId }: Props) {
             </View>
           )}
 
-          <Label styles={styles}>Ticket Price (USD)</Label>
+          <Label styles={styles}>Ticket Price (INR)</Label>
           <TextInput testID="price-input" style={styles.input} placeholder="0" value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor={colors.muted} />
 
           <Label styles={styles}>Booking Type</Label>

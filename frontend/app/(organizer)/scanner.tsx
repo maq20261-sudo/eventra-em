@@ -184,13 +184,13 @@ export default function Scanner() {
             {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status === "paid" && (
               <View style={styles.paidPill}>
                 <Ionicons name="shield-checkmark" size={14} color={colors.brand} />
-                <Text style={styles.paidText}>Paid online · ${result.booking.total_price.toFixed(2)}</Text>
+                <Text style={styles.paidText}>Paid online · ₹{result.booking.total_price.toFixed(0)}</Text>
               </View>
             )}
             {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status !== "paid" && (
               <View style={styles.payPill}>
                 <Ionicons name="wallet-outline" size={14} color={colors.warning} />
-                <Text style={styles.payText}>Collect ${result.booking.total_price.toFixed(2)} at venue</Text>
+                <Text style={styles.payText}>Collect ₹{result.booking.total_price.toFixed(0)} at venue</Text>
               </View>
             )}
             {result?.error && <Text style={styles.errorText}>{result.error}</Text>}

@@ -53,7 +53,8 @@ class TestPaymentsOrderCreation:
         data = r.json()
         assert data["razorpay_order_id"].startswith("order_")
         assert data["amount_paise"] == data["amount_inr"] * 100
-        assert data["amount_inr"] == int(round(paid["price"] * 83))
+        # Prices are stored & charged in INR directly (no conversion factor)
+        assert data["amount_inr"] == int(round(paid["price"]))
 
     def test_boost_order_created(self, api, organizer_headers):
         cfg = api.get(f"{BASE_URL}/api/payments/config").json()
@@ -68,8 +69,8 @@ class TestPaymentsOrderCreation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["razorpay_order_id"].startswith("order_")
-        # $14.99 * 83 = ~1244 INR
-        assert data["amount_inr"] > 1000
+        # 7d boost tier = ₹299
+        assert data["amount_inr"] == 299
 
     def test_free_event_rejects_payment(self, api, consumer_headers):
         cfg = api.get(f"{BASE_URL}/api/payments/config").json()

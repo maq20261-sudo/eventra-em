@@ -397,7 +397,7 @@ export default function Discover() {
                       </View>
                       <View style={styles.featuredPricePill}>
                         <Text style={styles.featuredPriceText}>
-                          {e.price > 0 ? `$${e.price.toFixed(0)}` : "Free"}
+                          {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
                         </Text>
                       </View>
                     </View>
@@ -455,7 +455,7 @@ export default function Discover() {
                 </View>
                 <View style={styles.priceBadge}>
                   <Text style={styles.priceBadgeText}>
-                    {e.price > 0 ? `$${e.price.toFixed(0)}` : "Free"}
+                    {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
                   </Text>
                 </View>
               </View>

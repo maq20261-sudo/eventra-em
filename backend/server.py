@@ -478,9 +478,9 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
 # ---------- Feature/Boost ----------
 
 FEATURE_TIERS = {
-    "24h": {"hours": 24, "price": 4.99, "label": "1 Day Boost"},
-    "7d": {"hours": 24 * 7, "price": 14.99, "label": "7 Day Boost"},
-    "30d": {"hours": 24 * 30, "price": 39.99, "label": "30 Day Boost"},
+    "24h": {"hours": 24, "price": 99, "label": "1 Day Boost"},
+    "7d": {"hours": 24 * 7, "price": 299, "label": "7 Day Boost"},
+    "30d": {"hours": 24 * 30, "price": 799, "label": "30 Day Boost"},
 }
 
 class BoostRequest(BaseModel):
@@ -633,11 +633,10 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
-        amount_usd = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
-        if amount_usd <= 0:
+        amount_inr = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
+        if amount_inr <= 0:
             raise HTTPException(status_code=400, detail="Free event — no payment needed")
-        amount_inr = int(round(amount_usd * 83))  # convert USD → INR
-        amount_paise = amount_inr * 100
+        amount_paise = int(round(amount_inr * 100))
         description = f"Booking · {event['title']}"
 
     elif body.kind == "boost":
@@ -651,9 +650,8 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         if ev["organizer_id"] != user["id"]:
             raise HTTPException(status_code=403, detail="Not your event")
         tier_cfg = FEATURE_TIERS[body.tier]
-        amount_usd = float(tier_cfg["price"])
-        amount_inr = int(round(amount_usd * 83))
-        amount_paise = amount_inr * 100
+        amount_inr = float(tier_cfg["price"])
+        amount_paise = int(round(amount_inr * 100))
         description = f"{tier_cfg['label']} · {ev['title']}"
 
     else:
@@ -679,7 +677,6 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         "payload": body.model_dump(),
         "amount_paise": amount_paise,
         "amount_inr": amount_inr,
-        "amount_usd": amount_usd,
         "razorpay_order_id": rzp_order["id"],
         "status": "created",
         "description": description,
@@ -693,7 +690,6 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         "razorpay_key_id": RAZORPAY_KEY_ID,
         "amount_paise": amount_paise,
         "amount_inr": amount_inr,
-        "amount_usd": amount_usd,
         "currency": "INR",
         "description": description,
         "prefill": {
@@ -734,7 +730,6 @@ async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
         "payment_id": body.razorpay_payment_id,
         "amount_paise": intent["amount_paise"],
         "amount_inr": intent["amount_inr"],
-        "amount_usd": intent["amount_usd"],
         "paid_at": datetime.now(timezone.utc).isoformat(),
     }
 

@@ -238,7 +238,7 @@ export default function Booking() {
           <View>
             <Text style={styles.stickyLabel}>Total</Text>
             <Text style={styles.stickyPrice}>
-              {totalPrice > 0 ? `$${totalPrice.toFixed(2)}` : "Free"}
+              {totalPrice > 0 ? `₹${totalPrice.toFixed(0)}` : "Free"}
             </Text>
           </View>
           <Pressable
@@ -274,7 +274,7 @@ export default function Booking() {
             <Text style={styles.successTitle}>Booking Confirmed!</Text>
             <Text style={styles.successSub}>Your ticket for {event.title}</Text>
             <Text style={styles.successPrice}>
-              {totalPrice > 0 ? `$${totalPrice.toFixed(2)}` : "Free entry"}
+              {totalPrice > 0 ? `₹${totalPrice.toFixed(0)}` : "Free entry"}
             </Text>
             <Pressable
               style={styles.successBtn}

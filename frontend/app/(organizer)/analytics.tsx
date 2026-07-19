@@ -67,7 +67,7 @@ export default function Analytics() {
           <KPICard
             icon="cash-outline"
             label="Revenue"
-            value={`$${(data?.total_revenue || 0).toFixed(0)}`}
+            value={`₹${(data?.total_revenue || 0).toFixed(0)}`}
             testID="kpi-revenue"
             styles={styles}
             colors={colors}
@@ -141,7 +141,7 @@ export default function Analytics() {
                 <Text style={styles.topTitle} numberOfLines={1}>{e.title}</Text>
                 <Text style={styles.topSub}>{e.tickets} ticket{e.tickets === 1 ? "" : "s"} sold</Text>
               </View>
-              <Text style={styles.topRevenue}>${e.revenue.toFixed(0)}</Text>
+              <Text style={styles.topRevenue}>₹{e.revenue.toFixed(0)}</Text>
             </View>
           ))}
         </View>

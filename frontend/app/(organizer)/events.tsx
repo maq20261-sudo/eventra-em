@@ -89,7 +89,7 @@ export default function OrganizerEvents() {
       // Simulated boost (payments not configured)
       const res = await api.featureEvent(boostEvent.id, tier);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setBoostSuccess(`Boosted for $${res.amount_charged.toFixed(2)} (simulated)`);
+      setBoostSuccess(`Boosted for ₹${res.amount_charged.toFixed(0)} (simulated)`);
       setBoostEvent(null);
       await load();
       setTimeout(() => setBoostSuccess(null), 2500);
@@ -106,7 +106,7 @@ export default function OrganizerEvents() {
       const verify = await api.verifyPayment(payload);
       const amt = verify?.result?.amount_charged || 0;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setBoostSuccess(`Boosted for $${amt.toFixed(2)}!`);
+      setBoostSuccess(`Boosted for ₹${amt.toFixed(0)}!`);
       setBoostEvent(null);
       await load();
       setTimeout(() => setBoostSuccess(null), 2500);
@@ -247,7 +247,7 @@ export default function OrganizerEvents() {
                   <Text style={styles.tierNote}>{t.note}</Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.tierPrice}>${t.price.toFixed(2)}</Text>
+                  <Text style={styles.tierPrice}>₹{t.price.toFixed(0)}</Text>
                   {boostLoading === t.key ? (
                     <ActivityIndicator size="small" color={colors.brand} />
                   ) : (

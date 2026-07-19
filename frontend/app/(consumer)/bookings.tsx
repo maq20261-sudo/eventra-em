@@ -135,7 +135,7 @@ export default function MyBookings() {
                 <View style={{ alignItems: "flex-end" }}>
                   <Text style={styles.smallLabel}>Total</Text>
                   <Text style={styles.priceValue}>
-                    {b.total_price > 0 ? `$${b.total_price.toFixed(2)}` : "Free"}
+                    {b.total_price > 0 ? `₹${b.total_price.toFixed(0)}` : "Free"}
                   </Text>
                 </View>
                 {b.status !== "confirmed" && (
