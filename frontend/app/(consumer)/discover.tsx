@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -140,6 +140,33 @@ export default function Discover() {
     return { featuredEvents: featured, regularEvents: regular };
   }, [events]);
 
+  // Featured carousel auto-scroll state
+  const carouselRef = useRef<ScrollView>(null);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const userInteractingRef = useRef(false);
+  const CAROUSEL_ITEM_STEP = CAROUSEL_WIDTH + spacing.md;
+
+  useEffect(() => {
+    if (featuredEvents.length <= 1) return;
+    const timer = setInterval(() => {
+      if (userInteractingRef.current) return;
+      setCarouselIndex((prev) => {
+        const next = (prev + 1) % featuredEvents.length;
+        carouselRef.current?.scrollTo({ x: next * CAROUSEL_ITEM_STEP, animated: true });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [featuredEvents.length, CAROUSEL_ITEM_STEP]);
+
+  const onCarouselScroll = (e: any) => {
+    const x = e.nativeEvent.contentOffset.x;
+    const idx = Math.round(x / CAROUSEL_ITEM_STEP);
+    if (idx !== carouselIndex && idx >= 0 && idx < featuredEvents.length) {
+      setCarouselIndex(idx);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Sticky header */}
@@ -238,11 +265,19 @@ export default function Discover() {
                 <Text style={styles.sectionCount}>{featuredEvents.length} boosted</Text>
               </View>
               <ScrollView
+                ref={carouselRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={CAROUSEL_WIDTH + spacing.md}
                 decelerationRate="fast"
                 contentContainerStyle={styles.carousel}
+                onScroll={onCarouselScroll}
+                scrollEventThrottle={32}
+                onScrollBeginDrag={() => { userInteractingRef.current = true; }}
+                onScrollEndDrag={() => {
+                  // Resume auto-scroll after 5s of inactivity
+                  setTimeout(() => { userInteractingRef.current = false; }, 5000);
+                }}
               >
                 {featuredEvents.map((e) => (
                   <Pressable
@@ -283,6 +318,16 @@ export default function Discover() {
                   </Pressable>
                 ))}
               </ScrollView>
+              {featuredEvents.length > 1 && (
+                <View style={styles.dotsRow} testID="carousel-dots">
+                  {featuredEvents.map((_, i) => (
+                    <View
+                      key={i}
+                      style={[styles.dot, i === carouselIndex && styles.dotActive]}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -511,6 +556,17 @@ const styles = StyleSheet.create({
   featuredMetaDot: {
     width: 3, height: 3, borderRadius: 2,
     backgroundColor: "rgba(255,255,255,0.6)", marginHorizontal: 4,
+  },
+  dotsRow: {
+    flexDirection: "row", justifyContent: "center", alignItems: "center",
+    gap: 6, marginTop: spacing.md,
+  },
+  dot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: colors.borderStrong,
+  },
+  dotActive: {
+    width: 20, backgroundColor: colors.brand,
   },
   cardBody: { padding: spacing.lg, gap: 6 },
   cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
