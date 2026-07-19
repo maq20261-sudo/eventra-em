@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -15,9 +15,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/src/AuthContext";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export default function Login() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const params = useLocalSearchParams<{ role?: string }>();
   const initialRole = (params.role === "organizer" ? "organizer" : "consumer") as "consumer" | "organizer";
   const [role, setRole] = useState<"consumer" | "organizer">(initialRole);
@@ -145,7 +148,7 @@ export default function Login() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.xl, paddingTop: spacing.lg, flexGrow: 1 },
   back: {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -7,7 +7,8 @@ import { Ionicons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -19,6 +20,8 @@ function fmtTime(iso: string) {
 }
 
 export default function TicketScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [booking, setBooking] = useState<any>(null);
@@ -164,7 +167,7 @@ export default function TicketScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
   header: {

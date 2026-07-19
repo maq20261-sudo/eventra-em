@@ -8,11 +8,14 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 const SEAT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 export default function Booking() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [event, setEvent] = useState<any>(null);
@@ -442,7 +445,7 @@ function TimeSlots({ slots, takenSlots, value, onSelect }: {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
   header: {

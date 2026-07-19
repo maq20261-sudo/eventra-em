@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Modal, Linking } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -6,7 +6,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 type Result = {
   ok: boolean;
@@ -18,6 +19,8 @@ type Result = {
 };
 
 export default function Scanner() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(true);
@@ -203,7 +206,7 @@ export default function Scanner() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceInverse },
   center: { alignItems: "center", justifyContent: "center" },
   header: {

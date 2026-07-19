@@ -1,10 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 type AnalyticsData = {
   total_revenue: number;
@@ -19,6 +20,8 @@ type AnalyticsData = {
 const CAT_COLORS = ["#059669", "#10B981", "#065F46", "#34D399", "#6EE7B7", "#A7F3D0"];
 
 export default function Analytics() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,7 +152,7 @@ function KPICard({ icon, label, value, testID }: { icon: any; label: string; val
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md },

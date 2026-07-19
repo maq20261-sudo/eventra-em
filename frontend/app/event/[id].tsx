@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
 } from "react-native";
@@ -11,9 +11,12 @@ import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
 import EventMap from "@/src/EventMap";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export default function EventDetail() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
@@ -174,7 +177,7 @@ export default function EventDetail() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
   heroWrap: { width: "100%", height: 340, backgroundColor: colors.surfaceTertiary },

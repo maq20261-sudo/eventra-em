@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
   ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -12,7 +12,8 @@ import * as Location from "expo-location";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
 import LocationPicker from "@/src/LocationPicker";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
 const BOOKING_TYPES = [
@@ -31,6 +32,8 @@ const DEFAULT_IMAGES = [
 type Props = { editId?: string };
 
 export default function EventForm({ editId }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const isEdit = !!editId;
 
@@ -391,7 +394,7 @@ function Label({ children }: { children: string }) {
   return <Text style={styles.label}>{children}</Text>;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,

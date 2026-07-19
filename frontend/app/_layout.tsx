@@ -7,10 +7,21 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/AuthContext";
+import { ThemeProvider, useTheme } from "@/src/ThemeContext";
 
 LogBox.ignoreAllLogs(true);
 
 SplashScreen.preventAutoHideAsync();
+
+function ThemedStack() {
+  const { colors, mode } = useTheme();
+  return (
+    <>
+      <StatusBar barStyle={mode === "dark" ? "light-content" : "dark-content"} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }} />
+    </>
+  );
+}
 
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
@@ -26,10 +37,11 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AuthProvider>
-          <StatusBar barStyle="dark-content" />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#F9FAFB" } }} />
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <ThemedStack />
+          </AuthProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

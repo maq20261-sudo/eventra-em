@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Modal,
 } from "react-native";
@@ -9,7 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 type Event = {
   id: string; title: string; date: string; image_url?: string;
@@ -24,6 +25,8 @@ function fmt(iso: string) {
 }
 
 export default function OrganizerEvents() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -281,7 +284,7 @@ export default function OrganizerEvents() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",

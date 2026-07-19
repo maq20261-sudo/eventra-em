@@ -1,12 +1,16 @@
+import { useMemo } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { colors, spacing, radius } from "@/src/theme";
+import { spacing, radius } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export default function Welcome() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
 
   const go = (path: string) => {
@@ -60,7 +64,7 @@ export default function Welcome() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceInverse },
   topRow: {
     paddingTop: 64,

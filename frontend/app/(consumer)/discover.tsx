@@ -19,7 +19,8 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { api } from "@/src/api";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
 const CATEGORIES: { key: string; label: string; image: string }[] = [
@@ -63,6 +64,8 @@ function formatTime(iso: string) {
 }
 
 export default function Discover() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -420,7 +423,7 @@ export default function Discover() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     paddingHorizontal: spacing.lg,

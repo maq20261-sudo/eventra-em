@@ -1,8 +1,9 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "@/src/theme";
+import { useTheme } from "@/src/ThemeContext";
 
 export default function OrganizerLayout() {
+  const { colors } = useTheme();
   return (
     <Tabs
       screenOptions={{

@@ -3,13 +3,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/src/AuthContext";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
+import { spacing, radius, shadows } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 
 export default function Profile() {
   const { user, signOut } = useAuth();
+  const { colors, mode, toggleMode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [notifEvents, setNotifEvents] = useState(true);
@@ -67,6 +70,26 @@ export default function Profile() {
         </View>
 
         <View style={styles.section}>
+          {/* Appearance */}
+          <View style={styles.row} testID="row-appearance">
+            <View style={styles.rowLeft}>
+              <View style={styles.rowIcon}>
+                <Ionicons name={mode === "dark" ? "moon" : "sunny-outline"} size={18} color={colors.onSurfaceTertiary} />
+              </View>
+              <View>
+                <Text style={styles.rowLabel}>Dark theme</Text>
+                <Text style={styles.rowSub}>{mode === "dark" ? "On" : "Off"}</Text>
+              </View>
+            </View>
+            <Switch
+              testID="theme-toggle"
+              value={mode === "dark"}
+              onValueChange={() => { Haptics.selectionAsync(); toggleMode(); }}
+              thumbColor={mode === "dark" ? colors.brand : colors.borderStrong}
+              trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+            />
+          </View>
+
           {/* Notifications */}
           <Pressable style={styles.row} onPress={() => toggle("notif")} testID="row-notifications">
             <View style={styles.rowLeft}>
@@ -78,18 +101,21 @@ export default function Profile() {
           {openSection === "notif" && (
             <View style={styles.subSection}>
               <SubRow
+                styles={styles}
                 label="New events near you"
                 sub="Get notified when organizers post nearby"
                 value={notifEvents}
                 onChange={(v) => { setNotifEvents(v); persist("gs_notif_events", v); }}
               />
               <SubRow
+                styles={styles}
                 label="Booking reminders"
                 sub="Reminder 24h before your event"
                 value={notifReminders}
                 onChange={(v) => { setNotifReminders(v); persist("gs_notif_reminders", v); }}
               />
               <SubRow
+                styles={styles}
                 label="Promotions & offers"
                 sub="Deals from featured events"
                 value={notifPromos}
@@ -129,10 +155,10 @@ export default function Profile() {
           </Pressable>
           {openSection === "help" && (
             <View style={styles.subSection}>
-              <FAQ q="How do I pay for a ticket?" a="For this release, payment is collected at the venue. The organizer will scan your QR ticket and confirm payment on arrival." />
-              <FAQ q="Can I cancel a booking?" a="Yes — open the ticket from My Tickets and use the cancel option. Cancelled tickets cannot be scanned." />
-              <FAQ q="Why is my event not appearing on Discover?" a="Events only show within the attendee's chosen radius. Organizers can also boost an event to feature it at the top of results." />
-              <FAQ q="Contact us" a="support@gatherspace.app · Mon–Fri, 9am–6pm PT" last />
+              <FAQ styles={styles} q="How do I pay for a ticket?" a="For this release, payment is collected at the venue. The organizer will scan your QR ticket and confirm payment on arrival." />
+              <FAQ styles={styles} q="Can I cancel a booking?" a="Yes — open the ticket from My Tickets and use the cancel option. Cancelled tickets cannot be scanned." />
+              <FAQ styles={styles} q="Why is my event not appearing on Discover?" a="Events only show within the attendee's chosen radius. Organizers can also boost an event to feature it at the top of results." />
+              <FAQ styles={styles} q="Contact us" a="support@gatherspace.app · Mon–Fri, 9am–6pm PT" last />
             </View>
           )}
 
@@ -165,7 +191,8 @@ export default function Profile() {
   );
 }
 
-function SubRow({ label, sub, value, onChange, last }: { label: string; sub: string; value: boolean; onChange: (v: boolean) => void; last?: boolean }) {
+function SubRow({ styles, label, sub, value, onChange, last }: { styles: any; label: string; sub: string; value: boolean; onChange: (v: boolean) => void; last?: boolean }) {
+  const { colors } = useTheme();
   return (
     <View style={[styles.subRow, last && { borderBottomWidth: 0 }]}>
       <View style={{ flex: 1 }}>
@@ -182,7 +209,7 @@ function SubRow({ label, sub, value, onChange, last }: { label: string; sub: str
   );
 }
 
-function FAQ({ q, a, last }: { q: string; a: string; last?: boolean }) {
+function FAQ({ styles, q, a, last }: { styles: any; q: string; a: string; last?: boolean }) {
   return (
     <View style={[styles.faqItem, last && { borderBottomWidth: 0 }]}>
       <Text style={styles.faqQ}>{q}</Text>
@@ -191,7 +218,7 @@ function FAQ({ q, a, last }: { q: string; a: string; last?: boolean }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.lg, gap: spacing.lg },
   title: { fontSize: 28, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.sm },
@@ -230,6 +257,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   rowLabel: { fontSize: 15, color: colors.onSurface },
+  rowSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   subSection: {
     paddingHorizontal: spacing.lg, paddingBottom: spacing.md, paddingTop: 4,
     borderBottomColor: colors.divider, borderBottomWidth: 1,

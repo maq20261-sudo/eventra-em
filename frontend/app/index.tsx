@@ -1,10 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/src/AuthContext";
-import { colors } from "@/src/theme";
+
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export default function Index() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -26,7 +29,7 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.surface,

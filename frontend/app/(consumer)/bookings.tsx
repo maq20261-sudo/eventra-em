@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl,
 } from "react-native";
@@ -7,7 +7,8 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 type Booking = {
   id: string;
@@ -27,6 +28,8 @@ function fmtDate(iso: string) {
 }
 
 export default function MyBookings() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [tab, setTab] = useState<"upcoming" | "completed">("upcoming");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,7 +151,7 @@ export default function MyBookings() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md },
   title: { fontSize: 28, fontWeight: "700", color: colors.onSurface },

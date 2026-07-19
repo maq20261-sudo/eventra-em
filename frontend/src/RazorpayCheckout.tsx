@@ -2,7 +2,8 @@ import React, { useEffect, useMemo } from "react";
 import { View, StyleSheet, ActivityIndicator, Text, Pressable, Modal, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing } from "@/src/theme";
+import { spacing } from "@/src/theme";
+import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export type RzpOrder = {
   intent_id: string;
@@ -101,6 +102,8 @@ function buildHtml(order: RzpOrder): string {
 }
 
 export default function RazorpayCheckout({ visible, order, onSuccess, onCancel, onError }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const html = useMemo(() => (order ? buildHtml(order) : ""), [order]);
 
   // On web, open Razorpay checkout via the Razorpay Web SDK directly (no WebView).
@@ -220,7 +223,7 @@ export default function RazorpayCheckout({ visible, order, onSuccess, onCancel, 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center",
