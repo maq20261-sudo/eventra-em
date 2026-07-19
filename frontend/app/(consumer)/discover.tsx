@@ -26,14 +26,21 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
-const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
-  { key: "All", label: "All", icon: "sparkles", color: "#059669" },
-  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6" },
-  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316" },
-  { key: "Tech", label: "Tech", icon: "hardware-chip", color: "#0EA5E9" },
-  { key: "Food", label: "Food", icon: "restaurant", color: "#EF4444" },
-  { key: "Sports", label: "Sports", icon: "basketball", color: "#14B8A6" },
-  { key: "Other", label: "Other", icon: "grid", color: "#64748B" },
+const CATEGORIES: { key: string; label: string; icon: any; color: string; image: string }[] = [
+  { key: "All", label: "All", icon: "sparkles", color: "#059669",
+    image: "https://images.unsplash.com/photo-1545150665-c72a8f0cf311?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHxwYXJ0eSUyMGV2ZW50fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
+  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6",
+    image: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwxfHxjb25jZXJ0fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
+  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316",
+    image: "https://images.pexels.com/photos/9221307/pexels-photo-9221307.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Tech", label: "Tech", icon: "hardware-chip", color: "#0EA5E9",
+    image: "https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHx0ZWNoJTIwY29uZmVyZW5jZXxlbnwwfHx8fDE3ODQ0ODE5NTV8MA&ixlib=rb-4.1.0&q=85&w=400" },
+  { key: "Food", label: "Food", icon: "restaurant", color: "#EF4444",
+    image: "https://images.pexels.com/photos/31071253/pexels-photo-31071253.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Sports", label: "Sports", icon: "basketball", color: "#14B8A6",
+    image: "https://images.unsplash.com/photo-1599158150601-1417ebbaafdd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHw0fHxzdGFkaXVtfGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
+  { key: "Other", label: "Other", icon: "grid", color: "#64748B",
+    image: "https://images.pexels.com/photos/2263436/pexels-photo-2263436.jpeg?auto=compress&cs=tinysrgb&w=400" },
 ];
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
 
@@ -296,25 +303,35 @@ export default function Discover() {
           {CATEGORIES.map((c) => {
             const active = category === c.key;
             return (
-              <Pressable
-                key={c.key}
-                testID={`chip-${c.key}`}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setCategory(c.key);
-                }}
-                style={[styles.catCard, { backgroundColor: c.color }, active && styles.catCardActive]}
-              >
-                <View style={styles.catIconWrap}>
-                  <Ionicons name={c.icon} size={20} color="#FFFFFF" />
-                </View>
-                {active && (
-                  <View style={styles.catCheck}>
-                    <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
+              <View key={c.key} style={styles.catCardShadow}>
+                <Pressable
+                  testID={`chip-${c.key}`}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setCategory(c.key);
+                  }}
+                  style={[styles.catCard, { backgroundColor: c.color }, active && styles.catCardActive]}
+                >
+                  <Image
+                    source={c.image}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    transition={0}
+                    recyclingKey={c.key}
+                  />
+                  <View style={styles.catOverlay} />
+                  <View style={styles.catIconWrap}>
+                    <Ionicons name={c.icon} size={20} color="#FFFFFF" />
                   </View>
-                )}
-                <Text style={styles.catCardLabel} numberOfLines={1}>{c.label}</Text>
-              </Pressable>
+                  {active && (
+                    <View style={styles.catCheck}>
+                      <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
+                    </View>
+                  )}
+                  <Text style={styles.catCardLabel} numberOfLines={1}>{c.label}</Text>
+                </Pressable>
+              </View>
             );
           })}
         </ScrollView>
@@ -537,6 +554,14 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
   catRow: { gap: spacing.md, paddingVertical: spacing.md, paddingRight: spacing.lg },
+  catCardShadow: {
+    // Outer wrapper carries the shadow ONLY.
+    // Do NOT set overflow:hidden here — it triggers a well-known
+    // Android bug (RN #30039) where elevation + overflow:hidden
+    // hides absolutely-positioned children on some devices.
+    borderRadius: radius.md,
+    ...shadows.card,
+  },
   catCard: {
     width: 96, height: 76,
     borderRadius: radius.md,
@@ -544,10 +569,13 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     justifyContent: "flex-end",
     padding: spacing.sm,
     flexShrink: 0,
-    ...shadows.card,
   },
   catCardActive: {
     borderWidth: 2, borderColor: colors.brand,
+  },
+  catOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
   },
   catIconWrap: {
     position: "absolute", top: 8, left: 8,
