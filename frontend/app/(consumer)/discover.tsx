@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  Dimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,8 +22,19 @@ import { api } from "@/src/api";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 
-const CATEGORIES = ["All", "Music", "Art", "Tech", "Food", "Sports", "Other"];
+const CATEGORIES: { key: string; label: string; image: string }[] = [
+  { key: "All", label: "All", image: "https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Music", label: "Music", image: "https://images.pexels.com/photos/210922/pexels-photo-210922.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Art", label: "Art", image: "https://images.pexels.com/photos/1839919/pexels-photo-1839919.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Tech", label: "Tech", image: "https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Food", label: "Food", image: "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Sports", label: "Sports", image: "https://images.pexels.com/photos/2444852/pexels-photo-2444852.jpeg?auto=compress&cs=tinysrgb&w=400" },
+  { key: "Other", label: "Other", image: "https://images.pexels.com/photos/2263436/pexels-photo-2263436.jpeg?auto=compress&cs=tinysrgb&w=400" },
+];
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const CAROUSEL_WIDTH = Math.min(SCREEN_WIDTH - 48, 320);
 
 type Event = {
   id: string;
@@ -122,6 +134,12 @@ export default function Discover() {
     Haptics.selectionAsync();
   };
 
+  const { featuredEvents, regularEvents } = useMemo(() => {
+    const featured = events.filter((e) => e.is_featured);
+    const regular = events.filter((e) => !e.is_featured);
+    return { featuredEvents: featured, regularEvents: regular };
+  }, [events]);
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Sticky header */}
@@ -160,21 +178,36 @@ export default function Discover() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}
+          contentContainerStyle={styles.catRow}
         >
-          {CATEGORIES.map((c) => (
-            <Pressable
-              key={c}
-              testID={`chip-${c}`}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setCategory(c);
-              }}
-              style={[styles.chip, category === c && styles.chipActive]}
-            >
-              <Text style={[styles.chipText, category === c && styles.chipTextActive]}>{c}</Text>
-            </Pressable>
-          ))}
+          {CATEGORIES.map((c) => {
+            const active = category === c.key;
+            return (
+              <Pressable
+                key={c.key}
+                testID={`chip-${c.key}`}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setCategory(c.key);
+                }}
+                style={[styles.catCard, active && styles.catCardActive]}
+              >
+                <Image source={c.image} style={StyleSheet.absoluteFill} contentFit="cover" />
+                <LinearGradient
+                  colors={active
+                    ? ["rgba(5,150,105,0.35)", "rgba(5,150,105,0.85)"]
+                    : ["rgba(17,24,39,0.25)", "rgba(17,24,39,0.75)"]}
+                  style={StyleSheet.absoluteFill}
+                />
+                {active && (
+                  <View style={styles.catCheck}>
+                    <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
+                  </View>
+                )}
+                <Text style={styles.catCardLabel} numberOfLines={1}>{c.label}</Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -195,7 +228,72 @@ export default function Discover() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
           showsVerticalScrollIndicator={false}
         >
-          {events.map((e) => (
+          {featuredEvents.length > 0 && (
+            <View style={styles.featuredSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons name="flame" size={16} color="#F59E0B" />
+                  <Text style={styles.sectionTitle}>Featured</Text>
+                </View>
+                <Text style={styles.sectionCount}>{featuredEvents.length} boosted</Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={CAROUSEL_WIDTH + spacing.md}
+                decelerationRate="fast"
+                contentContainerStyle={styles.carousel}
+              >
+                {featuredEvents.map((e) => (
+                  <Pressable
+                    key={e.id}
+                    testID={`featured-card-${e.id}`}
+                    style={styles.featuredCard}
+                    onPress={() => router.push(`/event/${e.id}` as any)}
+                  >
+                    <Image source={e.image_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+                    <LinearGradient
+                      colors={["rgba(31,41,55,0.15)", "rgba(31,41,55,0.85)"]}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View style={styles.featuredTop}>
+                      <View style={styles.featuredBadgeBig}>
+                        <Ionicons name="flame" size={12} color={colors.onBrandPrimary} />
+                        <Text style={styles.featuredBadgeText}>Featured</Text>
+                      </View>
+                      <View style={styles.featuredPricePill}>
+                        <Text style={styles.featuredPriceText}>
+                          {e.price > 0 ? `$${e.price.toFixed(0)}` : "Free"}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.featuredBottom}>
+                      <Text style={styles.featuredCategoryText}>{e.category}</Text>
+                      <Text style={styles.featuredTitle} numberOfLines={2}>{e.title}</Text>
+                      <View style={styles.featuredMetaRow}>
+                        <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.85)" />
+                        <Text style={styles.featuredMetaText}>{formatDate(e.date)}</Text>
+                        <View style={styles.featuredMetaDot} />
+                        <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
+                        <Text style={styles.featuredMetaText} numberOfLines={1}>
+                          {e.distance_km != null ? `${e.distance_km.toFixed(1)}km` : e.location_name}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {regularEvents.length > 0 && (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>All events</Text>
+              <Text style={styles.sectionCount}>{regularEvents.length} near you</Text>
+            </View>
+          )}
+
+          {regularEvents.map((e) => (
             <Pressable
               key={e.id}
               testID={`event-card-${e.id}`}
@@ -211,12 +309,6 @@ export default function Discover() {
                 <View style={styles.catBadge}>
                   <Text style={styles.catBadgeText}>{e.category}</Text>
                 </View>
-                {e.is_featured && (
-                  <View style={styles.featuredBadge}>
-                    <Ionicons name="flame" size={11} color={colors.onBrandPrimary} />
-                    <Text style={styles.featuredText}>Featured</Text>
-                  </View>
-                )}
                 <View style={styles.priceBadge}>
                   <Text style={styles.priceBadgeText}>
                     {e.price > 0 ? `$${e.price.toFixed(0)}` : "Free"}
@@ -307,21 +399,28 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
-  chipsRow: { gap: spacing.sm, paddingVertical: spacing.md, paddingRight: spacing.lg },
-  chip: {
-    height: 36,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
-    borderColor: colors.border,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceSecondary,
+  catRow: { gap: spacing.md, paddingVertical: spacing.md, paddingRight: spacing.lg },
+  catCard: {
+    width: 96, height: 76,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+    padding: spacing.sm,
     flexShrink: 0,
+    ...shadows.card,
   },
-  chipActive: { backgroundColor: colors.onSurface, borderColor: colors.onSurface },
-  chipText: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500" },
-  chipTextActive: { color: colors.surface, fontWeight: "600" },
+  catCardActive: {
+    borderWidth: 2, borderColor: colors.brand,
+  },
+  catCardLabel: {
+    color: colors.surface, fontSize: 13, fontWeight: "700",
+  },
+  catCheck: {
+    position: "absolute", top: 6, right: 6,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: colors.brand,
+    alignItems: "center", justifyContent: "center",
+  },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
   emptyTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginTop: spacing.md },
@@ -359,14 +458,60 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   priceBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
-  featuredBadge: {
-    position: "absolute", top: 12, left: 90,
-    flexDirection: "row", alignItems: "center", gap: 3,
+
+  // Section headings
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginBottom: spacing.md, marginTop: spacing.sm,
+  },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
+  sectionCount: { fontSize: 12, color: colors.muted, fontWeight: "500" },
+
+  // Featured carousel
+  featuredSection: { marginBottom: spacing.lg },
+  carousel: { gap: spacing.md, paddingRight: spacing.lg },
+  featuredCard: {
+    width: CAROUSEL_WIDTH, height: 220,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    ...shadows.floating,
+    flexShrink: 0,
+    justifyContent: "space-between",
+  },
+  featuredTop: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
+    padding: spacing.md,
+  },
+  featuredBadgeBig: {
+    flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: "#F59E0B",
-    paddingHorizontal: 8, paddingVertical: 4,
+    paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: radius.pill,
   },
-  featuredText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+  featuredBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+  featuredPricePill: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: radius.pill,
+  },
+  featuredPriceText: { fontSize: 11, color: colors.onSurface, fontWeight: "700" },
+  featuredBottom: { padding: spacing.md, gap: 4 },
+  featuredCategoryText: {
+    color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600",
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
+  featuredTitle: {
+    color: colors.surface, fontSize: 20, fontWeight: "700", lineHeight: 24,
+  },
+  featuredMetaRow: {
+    flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4,
+  },
+  featuredMetaText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "500" },
+  featuredMetaDot: {
+    width: 3, height: 3, borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.6)", marginHorizontal: 4,
+  },
   cardBody: { padding: spacing.lg, gap: 6 },
   cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
