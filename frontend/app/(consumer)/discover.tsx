@@ -26,14 +26,14 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
-const CATEGORIES: { key: string; label: string; image: string }[] = [
-  { key: "All", label: "All", image: "https://images.pexels.com/photos/1105666/pexels-photo-1105666.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Music", label: "Music", image: "https://images.pexels.com/photos/210922/pexels-photo-210922.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Art", label: "Art", image: "https://images.pexels.com/photos/1839919/pexels-photo-1839919.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Tech", label: "Tech", image: "https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Food", label: "Food", image: "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Sports", label: "Sports", image: "https://images.pexels.com/photos/2444852/pexels-photo-2444852.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Other", label: "Other", image: "https://images.pexels.com/photos/2263436/pexels-photo-2263436.jpeg?auto=compress&cs=tinysrgb&w=400" },
+const CATEGORIES: { key: string; label: string; icon: any; gradient: [string, string] }[] = [
+  { key: "All", label: "All", icon: "sparkles", gradient: ["#059669", "#0EA5A5"] },
+  { key: "Music", label: "Music", icon: "musical-notes", gradient: ["#8B5CF6", "#EC4899"] },
+  { key: "Art", label: "Art", icon: "color-palette", gradient: ["#F59E0B", "#EF4444"] },
+  { key: "Tech", label: "Tech", icon: "hardware-chip", gradient: ["#0EA5E9", "#6366F1"] },
+  { key: "Food", label: "Food", icon: "restaurant", gradient: ["#F97316", "#F43F5E"] },
+  { key: "Sports", label: "Sports", icon: "basketball", gradient: ["#10B981", "#0EA5E9"] },
+  { key: "Other", label: "Other", icon: "grid", gradient: ["#64748B", "#334155"] },
 ];
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
 
@@ -305,20 +305,21 @@ export default function Discover() {
                 }}
                 style={[styles.catCard, active && styles.catCardActive]}
               >
-                <Image
-                  source={c.image}
+                <LinearGradient
+                  colors={c.gradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
                   style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={0}
-                  recyclingKey={c.key}
                 />
                 <LinearGradient
                   colors={active
-                    ? ["rgba(5,150,105,0.35)", "rgba(5,150,105,0.85)"]
-                    : ["rgba(17,24,39,0.25)", "rgba(17,24,39,0.75)"]}
+                    ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.15)"]
+                    : ["rgba(0,0,0,0.25)", "rgba(0,0,0,0.55)"]}
                   style={StyleSheet.absoluteFill}
                 />
+                <View style={styles.catIconWrap}>
+                  <Ionicons name={c.icon} size={20} color="rgba(255,255,255,0.95)" />
+                </View>
                 {active && (
                   <View style={styles.catCheck}>
                     <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
@@ -555,11 +556,13 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     justifyContent: "flex-end",
     padding: spacing.sm,
     flexShrink: 0,
-    backgroundColor: "#1F2937",
     ...shadows.card,
   },
   catCardActive: {
     borderWidth: 2, borderColor: colors.brand,
+  },
+  catIconWrap: {
+    position: "absolute", top: 8, left: 8,
   },
   catCardLabel: {
     color: "#FFFFFF", fontSize: 13, fontWeight: "700",
