@@ -69,30 +69,40 @@ export default function Analytics() {
             label="Revenue"
             value={`$${(data?.total_revenue || 0).toFixed(0)}`}
             testID="kpi-revenue"
+            styles={styles}
+            colors={colors}
           />
           <KPICard
             icon="ticket-outline"
             label="Tickets Sold"
             value={String(data?.total_tickets || 0)}
             testID="kpi-tickets"
+            styles={styles}
+            colors={colors}
           />
           <KPICard
             icon="checkmark-done-outline"
             label="Checked In"
             value={String(data?.checked_in_tickets || 0)}
             testID="kpi-checkedin"
+            styles={styles}
+            colors={colors}
           />
           <KPICard
             icon="calendar-outline"
             label="Events"
             value={String(data?.total_events || 0)}
             testID="kpi-events"
+            styles={styles}
+            colors={colors}
           />
           <KPICard
             icon="people-outline"
             label="Attendees"
             value={String(data?.unique_attendees || 0)}
             testID="kpi-attendees"
+            styles={styles}
+            colors={colors}
           />
         </View>
 
@@ -140,7 +150,7 @@ export default function Analytics() {
   );
 }
 
-function KPICard({ icon, label, value, testID }: { icon: any; label: string; value: string; testID: string }) {
+function KPICard({ icon, label, value, testID, styles, colors }: { icon: any; label: string; value: string; testID: string; styles: any; colors: Colors }) {
   return (
     <View style={styles.kpiCard} testID={testID}>
       <View style={styles.kpiIcon}>

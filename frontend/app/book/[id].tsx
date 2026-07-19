@@ -176,6 +176,8 @@ export default function Booking() {
             booked={booked.booked_seats}
             selected={selectedSeats}
             onToggle={toggleSeat}
+            styles={styles}
+            colors={colors}
           />
         )}
 
@@ -185,6 +187,8 @@ export default function Booking() {
             takenGeneral={booked.total_general_booked}
             value={numSeats}
             onChange={setNumSeats}
+            styles={styles}
+            colors={colors}
           />
         )}
 
@@ -194,6 +198,8 @@ export default function Booking() {
             takenSlots={booked.booked_slots}
             value={slot}
             onSelect={(s) => { Haptics.selectionAsync(); setSlot(s); }}
+            styles={styles}
+            colors={colors}
           />
         )}
 
@@ -208,6 +214,8 @@ export default function Booking() {
               title="Pay online"
               subtitle={gatewayConfigured ? "Secure checkout via Razorpay · instant confirmation" : "Payment gateway unavailable"}
               onPress={() => { Haptics.selectionAsync(); setPaymentMethod("online"); }}
+              styles={styles}
+              colors={colors}
             />
             <PayMethodOption
               testID="pay-method-venue"
@@ -216,6 +224,8 @@ export default function Booking() {
               title="Pay at venue"
               subtitle="Reserve now · pay when you arrive"
               onPress={() => { Haptics.selectionAsync(); setPaymentMethod("venue"); }}
+              styles={styles}
+              colors={colors}
             />
           </View>
         )}
@@ -296,7 +306,7 @@ export default function Booking() {
   );
 }
 
-function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, testID }: {
+function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, testID, styles, colors }: {
   active: boolean;
   disabled?: boolean;
   icon: any;
@@ -304,6 +314,8 @@ function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, tes
   subtitle: string;
   onPress: () => void;
   testID: string;
+  styles: any;
+  colors: Colors;
 }) {
   return (
     <Pressable
@@ -329,8 +341,8 @@ function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, tes
   );
 }
 
-function SeatMap({ rows, cols, booked, selected, onToggle }: {
-  rows: number; cols: number; booked: string[]; selected: string[]; onToggle: (s: string) => void;
+function SeatMap({ rows, cols, booked, selected, onToggle, styles, colors }: {
+  rows: number; cols: number; booked: string[]; selected: string[]; onToggle: (s: string) => void; styles: any; colors: Colors;
 }) {
   return (
     <View>
@@ -387,8 +399,8 @@ function SeatMap({ rows, cols, booked, selected, onToggle }: {
   );
 }
 
-function GeneralPicker({ total, takenGeneral, value, onChange }: {
-  total: number; takenGeneral: number; value: number; onChange: (n: number) => void;
+function GeneralPicker({ total, takenGeneral, value, onChange, styles, colors }: {
+  total: number; takenGeneral: number; value: number; onChange: (n: number) => void; styles: any; colors: Colors;
 }) {
   const remaining = Math.max(0, total - takenGeneral);
   const dec = () => { if (value > 1) { Haptics.selectionAsync(); onChange(value - 1); } };
@@ -414,8 +426,8 @@ function GeneralPicker({ total, takenGeneral, value, onChange }: {
   );
 }
 
-function TimeSlots({ slots, takenSlots, value, onSelect }: {
-  slots: string[]; takenSlots: string[]; value: string | null; onSelect: (s: string) => void;
+function TimeSlots({ slots, takenSlots, value, onSelect, styles, colors }: {
+  slots: string[]; takenSlots: string[]; value: string | null; onSelect: (s: string) => void; styles: any; colors: Colors;
 }) {
   return (
     <View style={{ gap: spacing.md }}>
