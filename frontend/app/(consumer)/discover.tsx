@@ -26,14 +26,14 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
-const CATEGORIES: { key: string; label: string; icon: any; gradient: [string, string] }[] = [
-  { key: "All", label: "All", icon: "sparkles", gradient: ["#059669", "#0EA5A5"] },
-  { key: "Music", label: "Music", icon: "musical-notes", gradient: ["#8B5CF6", "#EC4899"] },
-  { key: "Art", label: "Art", icon: "color-palette", gradient: ["#F59E0B", "#EF4444"] },
-  { key: "Tech", label: "Tech", icon: "hardware-chip", gradient: ["#0EA5E9", "#6366F1"] },
-  { key: "Food", label: "Food", icon: "restaurant", gradient: ["#F97316", "#F43F5E"] },
-  { key: "Sports", label: "Sports", icon: "basketball", gradient: ["#10B981", "#0EA5E9"] },
-  { key: "Other", label: "Other", icon: "grid", gradient: ["#64748B", "#334155"] },
+const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
+  { key: "All", label: "All", icon: "sparkles", color: "#059669" },
+  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6" },
+  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316" },
+  { key: "Tech", label: "Tech", icon: "hardware-chip", color: "#0EA5E9" },
+  { key: "Food", label: "Food", icon: "restaurant", color: "#EF4444" },
+  { key: "Sports", label: "Sports", icon: "basketball", color: "#14B8A6" },
+  { key: "Other", label: "Other", icon: "grid", color: "#64748B" },
 ];
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
 
@@ -303,22 +303,10 @@ export default function Discover() {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setCategory(c.key);
                 }}
-                style={[styles.catCard, active && styles.catCardActive]}
+                style={[styles.catCard, { backgroundColor: c.color }, active && styles.catCardActive]}
               >
-                <LinearGradient
-                  colors={c.gradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-                <LinearGradient
-                  colors={active
-                    ? ["rgba(0,0,0,0)", "rgba(0,0,0,0.15)"]
-                    : ["rgba(0,0,0,0.25)", "rgba(0,0,0,0.55)"]}
-                  style={StyleSheet.absoluteFill}
-                />
                 <View style={styles.catIconWrap}>
-                  <Ionicons name={c.icon} size={20} color="rgba(255,255,255,0.95)" />
+                  <Ionicons name={c.icon} size={20} color="#FFFFFF" />
                 </View>
                 {active && (
                   <View style={styles.catCheck}>
