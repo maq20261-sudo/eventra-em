@@ -10,6 +10,9 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Alert,
+  Linking,
+  Platform,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -74,6 +77,7 @@ export default function Discover() {
   const [radiusKm, setRadiusKm] = useState(10);
   const [location, setLocation] = useState<{ lat: number; lng: number; label: string }>(DEFAULT_LOC);
   const [locModalOpen, setLocModalOpen] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -112,10 +116,50 @@ export default function Discover() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const requestGPS = async () => {
+    if (gpsLoading) return;
+    setGpsLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const pos = await Location.getCurrentPositionAsync({});
+      // Web fallback — expo-location has limited support on web
+      if (Platform.OS === "web") {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+          Alert.alert("Not supported", "Location is not available in this environment. Please use the Expo Go app or a device build to use your current location.");
+          return;
+        }
+        const pos: GeolocationPosition = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+        });
+        const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
+        setLocation(newLoc);
+        await storage.setItem("gs_location", JSON.stringify(newLoc));
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        return;
+      }
+
+      const perm = await Location.getForegroundPermissionsAsync();
+      let status = perm.status;
+      let canAskAgain = perm.canAskAgain;
+
+      if (status !== "granted") {
+        if (canAskAgain) {
+          const req = await Location.requestForegroundPermissionsAsync();
+          status = req.status;
+          canAskAgain = req.canAskAgain;
+        }
+      }
+
+      if (status !== "granted") {
+        Alert.alert(
+          "Location permission needed",
+          "We need your location to show events nearby. Enable location access from settings.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Settings", onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
+
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const label = "Your current location";
       const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label };
       setLocation(newLoc);
@@ -123,6 +167,9 @@ export default function Discover() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (e) {
       console.log("GPS error", e);
+      Alert.alert("Couldn't get location", "Please check that location services are enabled on your device and try again.");
+    } finally {
+      setGpsLoading(false);
     }
   };
 
@@ -390,9 +437,13 @@ export default function Discover() {
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Location & Radius</Text>
 
-            <Pressable style={styles.gpsBtn} onPress={requestGPS} testID="use-gps-btn">
-              <Ionicons name="navigate" size={18} color={colors.brand} />
-              <Text style={styles.gpsText}>Use my current location</Text>
+            <Pressable style={styles.gpsBtn} onPress={requestGPS} testID="use-gps-btn" disabled={gpsLoading}>
+              {gpsLoading ? (
+                <ActivityIndicator size="small" color={colors.brand} />
+              ) : (
+                <Ionicons name="navigate" size={18} color={colors.brand} />
+              )}
+              <Text style={styles.gpsText}>{gpsLoading ? "Locating…" : "Use my current location"}</Text>
             </Pressable>
 
             <Text style={styles.currentLoc}>{location.label}</Text>
@@ -461,7 +512,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderWidth: 2, borderColor: colors.brand,
   },
   catCardLabel: {
-    color: colors.surface, fontSize: 13, fontWeight: "700",
+    color: "#FFFFFF", fontSize: 13, fontWeight: "700",
   },
   catCheck: {
     position: "absolute", top: 6, right: 6,
@@ -498,7 +549,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: radius.pill,
   },
-  catBadgeText: { fontSize: 11, color: colors.onSurface, fontWeight: "600" },
+  catBadgeText: { fontSize: 11, color: "#111827", fontWeight: "600" },
   priceBadge: {
     position: "absolute", top: 12, right: 12,
     backgroundColor: colors.brandPrimary,
@@ -543,14 +594,14 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: radius.pill,
   },
-  featuredPriceText: { fontSize: 11, color: colors.onSurface, fontWeight: "700" },
+  featuredPriceText: { fontSize: 11, color: "#111827", fontWeight: "700" },
   featuredBottom: { padding: spacing.md, gap: 4 },
   featuredCategoryText: {
     color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600",
     textTransform: "uppercase", letterSpacing: 0.5,
   },
   featuredTitle: {
-    color: colors.surface, fontSize: 20, fontWeight: "700", lineHeight: 24,
+    color: "#FFFFFF", fontSize: 20, fontWeight: "700", lineHeight: 24,
   },
   featuredMetaRow: {
     flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4,

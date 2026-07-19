@@ -74,7 +74,7 @@ export default function EventDetail() {
           />
           <SafeAreaView edges={["top"]} style={styles.heroTop}>
             <Pressable onPress={() => router.back()} style={styles.iconBtn} testID="event-back-btn">
-              <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+              <Ionicons name="chevron-back" size={22} color="#111827" />
             </Pressable>
             <View style={styles.categoryPill}>
               <Text style={styles.categoryText}>{event.category}</Text>
@@ -83,7 +83,7 @@ export default function EventDetail() {
           <View style={styles.heroBottom}>
             <Text style={styles.heroTitle}>{event.title}</Text>
             <View style={styles.heroMetaRow}>
-              <Ionicons name="location-outline" size={14} color={colors.surface} />
+              <Ionicons name="location-outline" size={14} color="#FFFFFF" />
               <Text style={styles.heroMeta}>{event.location_name}</Text>
             </View>
           </View>
@@ -198,14 +198,14 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill,
     marginTop: spacing.sm,
   },
-  categoryText: { fontSize: 11, fontWeight: "600", color: colors.onSurface },
+  categoryText: { fontSize: 11, fontWeight: "600", color: "#111827" },
   heroBottom: {
     position: "absolute", bottom: spacing.xl, left: spacing.lg, right: spacing.lg,
     gap: 6,
   },
-  heroTitle: { fontSize: 28, fontWeight: "700", color: colors.surface, lineHeight: 34 },
+  heroTitle: { fontSize: 28, fontWeight: "700", color: "#FFFFFF", lineHeight: 34 },
   heroMetaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  heroMeta: { fontSize: 14, color: colors.surface, opacity: 0.9 },
+  heroMeta: { fontSize: 14, color: "#FFFFFF", opacity: 0.9 },
   body: { padding: spacing.lg, gap: spacing.md },
   dateCard: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
