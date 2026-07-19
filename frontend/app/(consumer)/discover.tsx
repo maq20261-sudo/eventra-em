@@ -99,17 +99,53 @@ export default function Discover() {
   }, [location, radiusKm, category, search]);
 
   useEffect(() => {
-    // Load saved location
+    // Load saved location; if none saved, silently request current location.
     (async () => {
       const savedStr = await storage.getItem<string>("gs_location", "");
       const savedRadius = await storage.getItem<number>("gs_radius", 10);
+      if (savedRadius) setRadiusKm(savedRadius);
+
       if (savedStr) {
         try {
           const parsed = JSON.parse(savedStr);
-          if (parsed && parsed.lat && parsed.lng) setLocation(parsed);
+          if (parsed && parsed.lat && parsed.lng) {
+            setLocation(parsed);
+            return;
+          }
         } catch {}
       }
-      if (savedRadius) setRadiusKm(savedRadius);
+
+      // No saved location — try to auto-detect on first launch (silent)
+      try {
+        if (Platform.OS === "web") {
+          if (typeof navigator !== "undefined" && navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
+                setLocation(newLoc);
+                storage.setItem("gs_location", JSON.stringify(newLoc));
+              },
+              () => { /* silent fallback to DEFAULT_LOC */ },
+              { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+            );
+          }
+          return;
+        }
+
+        const perm = await Location.getForegroundPermissionsAsync();
+        let status = perm.status;
+        if (status !== "granted" && perm.canAskAgain) {
+          const req = await Location.requestForegroundPermissionsAsync();
+          status = req.status;
+        }
+        if (status !== "granted") return; // silent fallback to DEFAULT_LOC
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
+        setLocation(newLoc);
+        await storage.setItem("gs_location", JSON.stringify(newLoc));
+      } catch (e) {
+        console.log("Auto-locate failed", e);
+      }
     })();
   }, []);
 
@@ -269,7 +305,14 @@ export default function Discover() {
                 }}
                 style={[styles.catCard, active && styles.catCardActive]}
               >
-                <Image source={c.image} style={StyleSheet.absoluteFill} contentFit="cover" />
+                <Image
+                  source={c.image}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={0}
+                  recyclingKey={c.key}
+                />
                 <LinearGradient
                   colors={active
                     ? ["rgba(5,150,105,0.35)", "rgba(5,150,105,0.85)"]
@@ -437,16 +480,22 @@ export default function Discover() {
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Location & Radius</Text>
 
-            <Pressable style={styles.gpsBtn} onPress={requestGPS} testID="use-gps-btn" disabled={gpsLoading}>
-              {gpsLoading ? (
-                <ActivityIndicator size="small" color={colors.brand} />
-              ) : (
-                <Ionicons name="navigate" size={18} color={colors.brand} />
-              )}
-              <Text style={styles.gpsText}>{gpsLoading ? "Locating…" : "Use my current location"}</Text>
-            </Pressable>
-
-            <Text style={styles.currentLoc}>{location.label}</Text>
+            <View style={styles.locInfoRow}>
+              <View style={styles.locInfoIcon}>
+                <Ionicons name="location" size={18} color={colors.brand} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.locInfoLabel}>Current location</Text>
+                <Text style={styles.locInfoValue} numberOfLines={1}>{location.label}</Text>
+              </View>
+              <Pressable onPress={requestGPS} testID="refresh-gps-btn" disabled={gpsLoading} style={styles.locRefreshBtn} hitSlop={8}>
+                {gpsLoading ? (
+                  <ActivityIndicator size="small" color={colors.brand} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.brand} />
+                )}
+              </Pressable>
+            </View>
 
             <Text style={styles.radiusLabel}>Search radius</Text>
             <View style={styles.radiusRow}>
@@ -506,6 +555,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     justifyContent: "flex-end",
     padding: spacing.sm,
     flexShrink: 0,
+    backgroundColor: "#1F2937",
     ...shadows.card,
   },
   catCardActive: {
@@ -650,6 +700,23 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   gpsText: { color: colors.onBrandTertiary, fontWeight: "600" },
   currentLoc: { fontSize: 14, color: colors.muted },
+  locInfoRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceTertiary,
+    padding: spacing.md, borderRadius: radius.md,
+  },
+  locInfoIcon: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  locInfoLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
+  locInfoValue: { fontSize: 14, color: colors.onSurface, fontWeight: "600", marginTop: 2 },
+  locRefreshBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center", justifyContent: "center",
+  },
   radiusLabel: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500", marginTop: spacing.sm },
   radiusRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   radiusChip: {
