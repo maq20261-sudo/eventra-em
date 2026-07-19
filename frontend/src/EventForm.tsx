@@ -12,6 +12,7 @@ import * as Location from "expo-location";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
 import LocationPicker from "@/src/LocationPicker";
+import * as ImagePicker from "expo-image-picker";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
@@ -97,6 +98,38 @@ export default function EventForm({ editId }: Props) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (e) { console.log(e); }
   };
+
+  const pickBanner = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError("Photo library permission is required to upload a banner.");
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        aspect: [16, 9],
+        allowsEditing: true,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        setError("Could not read image data.");
+        return;
+      }
+      const mime = asset.mimeType || "image/jpeg";
+      const dataUri = `data:${mime};base64,${asset.base64}`;
+      setImageUrl(dataUri);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      setError(e?.message || "Failed to pick image");
+    }
+  };
+
+  const isCustomBanner = imageUrl.startsWith("data:") || !DEFAULT_IMAGES.includes(imageUrl);
 
   const submit = async () => {
     setError(null);
@@ -187,10 +220,10 @@ export default function EventForm({ editId }: Props) {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 200 }}
           keyboardShouldPersistTaps="handled"
         >
-          <Label>Event Title</Label>
+          <Label styles={styles}>Event Title</Label>
           <TextInput testID="title-input" style={styles.input} placeholder="Sunset Symphony" value={title} onChangeText={setTitle} placeholderTextColor={colors.muted} />
 
-          <Label>Description</Label>
+          <Label styles={styles}>Description</Label>
           <TextInput
             testID="desc-input"
             style={[styles.input, { height: 100, textAlignVertical: "top" }]}
@@ -199,7 +232,7 @@ export default function EventForm({ editId }: Props) {
             placeholderTextColor={colors.muted}
           />
 
-          <Label>Category</Label>
+          <Label styles={styles}>Category</Label>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
             {CATEGORIES.map((c) => (
               <Pressable
@@ -212,8 +245,29 @@ export default function EventForm({ editId }: Props) {
             ))}
           </ScrollView>
 
-          <Label>Cover Image</Label>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+          <Label styles={styles}>Cover Image</Label>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm, paddingRight: spacing.md }}>
+            <Pressable
+              onPress={pickBanner}
+              style={[styles.uploadCard, isCustomBanner && styles.imgOptionActive]}
+              testID="upload-banner-btn"
+            >
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.brand} />
+              <Text style={styles.uploadText}>Upload</Text>
+            </Pressable>
+            {isCustomBanner && (
+              <Pressable
+                onPress={() => {}}
+                style={[styles.imgOption, styles.imgOptionActive]}
+                testID="custom-banner-thumb"
+              >
+                <Image
+                  source={imageUrl}
+                  style={{ width: 90, height: 60, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary }}
+                  contentFit="cover"
+                />
+              </Pressable>
+            )}
             {DEFAULT_IMAGES.map((u) => (
               <Pressable
                 key={u}
@@ -226,13 +280,13 @@ export default function EventForm({ editId }: Props) {
             ))}
           </ScrollView>
 
-          <Label>Date</Label>
+          <Label styles={styles}>Date</Label>
           <TextInput testID="date-input" style={styles.input} placeholder="YYYY-MM-DD" value={dateStr} onChangeText={setDateStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
 
-          <Label>Time (24h)</Label>
+          <Label styles={styles}>Time (24h)</Label>
           <TextInput testID="time-input" style={styles.input} placeholder="19:30" value={timeStr} onChangeText={setTimeStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
 
-          <Label>Location</Label>
+          <Label styles={styles}>Location</Label>
           <Pressable
             style={styles.locPicker}
             onPress={() => setPickerOpen(true)}
@@ -278,10 +332,10 @@ export default function EventForm({ editId }: Props) {
             </View>
           )}
 
-          <Label>Ticket Price (USD)</Label>
+          <Label styles={styles}>Ticket Price (USD)</Label>
           <TextInput testID="price-input" style={styles.input} placeholder="0" value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholderTextColor={colors.muted} />
 
-          <Label>Booking Type</Label>
+          <Label styles={styles}>Booking Type</Label>
           <View style={styles.typeCol}>
             {BOOKING_TYPES.map((t) => (
               <Pressable
@@ -300,11 +354,11 @@ export default function EventForm({ editId }: Props) {
           {bookingType === "seat_map" && (
             <View style={styles.row2}>
               <View style={{ flex: 1 }}>
-                <Label>Rows</Label>
+                <Label styles={styles}>Rows</Label>
                 <TextInput testID="rows-input" style={styles.input} value={seatRows} onChangeText={setSeatRows} keyboardType="number-pad" placeholderTextColor={colors.muted} />
               </View>
               <View style={{ flex: 1 }}>
-                <Label>Columns</Label>
+                <Label styles={styles}>Columns</Label>
                 <TextInput testID="cols-input" style={styles.input} value={seatCols} onChangeText={setSeatCols} keyboardType="number-pad" placeholderTextColor={colors.muted} />
               </View>
             </View>
@@ -312,14 +366,14 @@ export default function EventForm({ editId }: Props) {
 
           {bookingType === "general" && (
             <>
-              <Label>Total Seats</Label>
+              <Label styles={styles}>Total Seats</Label>
               <TextInput testID="total-seats-input" style={styles.input} value={totalSeats} onChangeText={setTotalSeats} keyboardType="number-pad" placeholderTextColor={colors.muted} />
             </>
           )}
 
           {bookingType === "time_slot" && (
             <>
-              <Label>Time Slots</Label>
+              <Label styles={styles}>Time Slots</Label>
               {timeSlots.map((s, i) => (
                 <View key={i} style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
                   <TextInput
@@ -390,7 +444,7 @@ export default function EventForm({ editId }: Props) {
   );
 }
 
-function Label({ children }: { children: string }) {
+function Label({ styles, children }: { styles: any; children: string }) {
   return <Text style={styles.label}>{children}</Text>;
 }
 
@@ -434,6 +488,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   chipTextActive: { color: colors.surface, fontWeight: "600" },
   imgOption: { padding: 2, borderRadius: 8, borderWidth: 2, borderColor: "transparent" },
   imgOptionActive: { borderColor: colors.brand },
+  uploadCard: {
+    width: 94, height: 64, borderRadius: 10,
+    borderWidth: 2, borderColor: colors.borderStrong,
+    borderStyle: "dashed",
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center", justifyContent: "center",
+    gap: 2,
+  },
+  uploadText: { fontSize: 11, color: colors.brand, fontWeight: "600" },
   row2: { flexDirection: "row", gap: spacing.md },
   gpsBtn: {
     flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",

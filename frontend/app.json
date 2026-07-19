@@ -13,7 +13,8 @@
       "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find events happening near you",
-        "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance"
+        "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance",
+        "NSPhotoLibraryUsageDescription": "Upload a cover image for your event"
       }
     },
     "android": {
@@ -26,7 +27,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -49,6 +51,12 @@
         "expo-camera",
         {
           "cameraPermission": "Scan ticket QR codes at your event entrance"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Upload a cover image for your event"
         }
       ]
     ],
