@@ -9,14 +9,38 @@ import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
-type Result = {
+type Preview = {
   ok: boolean;
   already_checked_in?: boolean;
+  cancelled?: boolean;
+  checked_in_at?: string | null;
   event_title?: string;
   attendee_name?: string | null;
+  attendee_email?: string | null;
   booking?: any;
   error?: string;
 };
+
+type Confirmed = {
+  attendee_name?: string | null;
+  event_title?: string;
+  booking?: any;
+  already_checked_in?: boolean;
+};
+
+function ticketTypeLine(booking: any): { label: string; icon: any } {
+  if (!booking) return { label: "-", icon: "ticket-outline" };
+  if (booking.seats?.length) {
+    return { label: `Seats · ${booking.seats.join(", ")}`, icon: "grid-outline" };
+  }
+  if (booking.num_seats) {
+    return { label: `${booking.num_seats} × General Admission`, icon: "people-outline" };
+  }
+  if (booking.time_slot) {
+    return { label: `Time slot · ${booking.time_slot}`, icon: "time-outline" };
+  }
+  return { label: "General Admission", icon: "ticket-outline" };
+}
 
 export default function Scanner() {
   const { colors } = useTheme();
@@ -24,7 +48,12 @@ export default function Scanner() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(true);
-  const [result, setResult] = useState<Result | null>(null);
+
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmed, setConfirmed] = useState<Confirmed | null>(null);
+
   const lastScannedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -34,10 +63,11 @@ export default function Scanner() {
   }, [permission, requestPermission]);
 
   const onScanned = async (data: string) => {
-    if (!scanning) return;
+    if (!scanning || previewLoading) return;
     if (lastScannedRef.current === data) return;
     lastScannedRef.current = data;
     setScanning(false);
+
     let bookingId: string | null = null;
     try {
       const parsed = JSON.parse(data);
@@ -47,26 +77,59 @@ export default function Scanner() {
     }
     if (!bookingId) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setResult({ ok: false, error: "Invalid QR code. Not a GatherSpace ticket." });
+      setPreview({ ok: false, error: "Invalid QR code. Not a GatherSpace ticket." });
       return;
     }
+
+    setPreviewLoading(true);
     try {
-      const r = await api.checkIn(bookingId);
+      const r = await api.checkInPreview(bookingId);
       Haptics.notificationAsync(
         r.already_checked_in
           ? Haptics.NotificationFeedbackType.Warning
           : Haptics.NotificationFeedbackType.Success
       );
-      setResult({ ok: true, ...r });
+      setPreview({ ok: true, ...r });
     } catch (e: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setResult({ ok: false, error: e?.message || "Check-in failed" });
+      setPreview({ ok: false, error: e?.message || "Ticket lookup failed" });
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
-  const scanAgain = () => {
+  const confirmEntry = async () => {
+    if (!preview?.booking?.id || confirming) return;
+    setConfirming(true);
+    try {
+      const r = await api.checkIn(preview.booking.id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setConfirmed({
+        attendee_name: r.attendee_name || preview.attendee_name,
+        event_title: r.event_title || preview.event_title,
+        booking: r.booking || preview.booking,
+        already_checked_in: r.already_checked_in,
+      });
+      setPreview(null);
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setPreview({ ok: false, error: e?.message || "Check-in failed" });
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const cancelPreview = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPreview(null);
     lastScannedRef.current = null;
-    setResult(null);
+    setScanning(true);
+  };
+
+  const scanNext = () => {
+    lastScannedRef.current = null;
+    setConfirmed(null);
+    setPreview(null);
     setScanning(true);
   };
 
@@ -110,6 +173,18 @@ export default function Scanner() {
     );
   }
 
+  const previewInvalid = preview && !preview.ok;
+  const previewValid = preview && preview.ok;
+  const isPaid = preview?.booking?.payment_status === "paid";
+  const owesMoney = (preview?.booking?.total_price || 0) > 0 && !isPaid;
+  const price = preview?.booking?.total_price || 0;
+  const ttype = ticketTypeLine(preview?.booking);
+  const canConfirm =
+    !!previewValid &&
+    !preview?.cancelled &&
+    !preview?.already_checked_in &&
+    !confirming;
+
   return (
     <View style={styles.container}>
       <CameraView
@@ -122,7 +197,7 @@ export default function Scanner() {
       <SafeAreaView edges={["top"]} style={styles.overlayTop}>
         <View style={styles.header}>
           <Pressable style={styles.iconBtnDark} onPress={() => router.back()} testID="scanner-back-btn">
-            <Ionicons name="chevron-back" size={22} color={colors.surface} />
+            <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.headerTitleLight}>Scan Ticket</Text>
           <View style={styles.iconBtnDark} />
@@ -139,65 +214,183 @@ export default function Scanner() {
         <Text style={styles.frameHint}>Point at attendee&apos;s QR code</Text>
       </View>
 
-      <Modal visible={!!result} transparent animationType="fade">
+      {previewLoading && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="small" color={colors.brand} />
+            <Text style={styles.loadingText}>Reading ticket…</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Verification (pre-check-in) modal */}
+      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={cancelPreview}>
         <View style={styles.modalBg}>
-          <View style={styles.resultCard}>
-            <View style={[
-              styles.resultIcon,
-              !result?.ok && { backgroundColor: colors.error },
-              result?.already_checked_in && { backgroundColor: colors.warning },
-            ]}>
-              <Ionicons
-                name={
-                  !result?.ok ? "close" :
-                  result?.already_checked_in ? "alert" : "checkmark"
-                }
-                size={40}
-                color={colors.onBrandPrimary}
-              />
-            </View>
-            <Text style={styles.resultTitle}>
-              {!result?.ok
-                ? "Not Valid"
-                : result?.already_checked_in
-                ? "Already Checked In"
-                : "Welcome!"}
-            </Text>
-            {result?.ok && result?.event_title && (
-              <Text style={styles.resultSub}>{result.event_title}</Text>
+          <View style={styles.verifyCard}>
+            {previewInvalid ? (
+              <>
+                <View style={[styles.resultIcon, { backgroundColor: colors.error }]}>
+                  <Ionicons name="close" size={40} color="#FFFFFF" />
+                </View>
+                <Text style={styles.resultTitle}>Not Valid</Text>
+                <Text style={styles.errorText}>{preview?.error}</Text>
+                <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-again-btn">
+                  <Ionicons name="scan" size={16} color={colors.onBrandPrimary} />
+                  <Text style={styles.primaryBtnText}>Scan next ticket</Text>
+                </Pressable>
+              </>
+            ) : preview?.cancelled ? (
+              <>
+                <View style={[styles.resultIcon, { backgroundColor: colors.error }]}>
+                  <Ionicons name="ban" size={36} color="#FFFFFF" />
+                </View>
+                <Text style={styles.resultTitle}>Booking Cancelled</Text>
+                <Text style={styles.resultSub}>This ticket was cancelled and cannot be used.</Text>
+                <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-again-btn">
+                  <Ionicons name="scan" size={16} color={colors.onBrandPrimary} />
+                  <Text style={styles.primaryBtnText}>Scan next ticket</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* Status hero */}
+                {preview?.already_checked_in ? (
+                  <View style={[styles.statusHero, { backgroundColor: colors.warning }]}>
+                    <Ionicons name="alert-circle" size={22} color="#FFFFFF" />
+                    <Text style={styles.statusHeroText}>Already Checked In</Text>
+                  </View>
+                ) : isPaid ? (
+                  <View style={[styles.statusHero, { backgroundColor: "#059669" }]}>
+                    <Ionicons name="shield-checkmark" size={22} color="#FFFFFF" />
+                    <Text style={styles.statusHeroText}>Paid Online</Text>
+                  </View>
+                ) : owesMoney ? (
+                  <View style={[styles.statusHero, { backgroundColor: "#D97706" }]}>
+                    <Ionicons name="wallet" size={22} color="#FFFFFF" />
+                    <Text style={styles.statusHeroText}>Payment Pending</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.statusHero, { backgroundColor: "#059669" }]}>
+                    <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
+                    <Text style={styles.statusHeroText}>Free Ticket</Text>
+                  </View>
+                )}
+
+                <Text style={styles.eventTitle} numberOfLines={2}>{preview?.event_title}</Text>
+
+                <View style={styles.rowBlock}>
+                  <View style={styles.rowIcon}>
+                    <Ionicons name="person" size={16} color={colors.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowLabel}>Attendee</Text>
+                    <Text style={styles.rowValue} numberOfLines={1}>
+                      {preview?.attendee_name || "Guest"}
+                    </Text>
+                    {preview?.attendee_email && (
+                      <Text style={styles.rowSub} numberOfLines={1}>{preview.attendee_email}</Text>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.rowBlock}>
+                  <View style={styles.rowIcon}>
+                    <Ionicons name={ttype.icon} size={16} color={colors.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowLabel}>Ticket type</Text>
+                    <Text style={styles.rowValue} numberOfLines={2}>{ttype.label}</Text>
+                  </View>
+                </View>
+
+                {price > 0 && (
+                  <View style={styles.rowBlock}>
+                    <View style={styles.rowIcon}>
+                      <Ionicons name="cash" size={16} color={colors.brand} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowLabel}>Amount</Text>
+                      <Text style={styles.rowValue}>₹{price.toFixed(0)}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {owesMoney && (
+                  <View style={styles.collectBanner}>
+                    <Ionicons name="alert-circle" size={16} color="#92400E" />
+                    <Text style={styles.collectText}>
+                      Collect ₹{price.toFixed(0)} at the gate before confirming entry
+                    </Text>
+                  </View>
+                )}
+
+                {preview?.already_checked_in && (
+                  <Text style={styles.checkedInHint}>
+                    {preview.checked_in_at
+                      ? `Checked in at ${new Date(preview.checked_in_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                      : "This ticket has already been used."}
+                  </Text>
+                )}
+
+                <View style={styles.actionsRow}>
+                  <Pressable
+                    style={styles.secondaryBtn}
+                    onPress={cancelPreview}
+                    testID="cancel-scan-btn"
+                    disabled={confirming}
+                  >
+                    <Text style={styles.secondaryBtnText}>Cancel</Text>
+                  </Pressable>
+                  {canConfirm ? (
+                    <Pressable
+                      style={[styles.primaryBtn, styles.primaryBtnFlex]}
+                      onPress={confirmEntry}
+                      testID="confirm-entry-btn"
+                    >
+                      {confirming ? (
+                        <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark-circle" size={18} color={colors.onBrandPrimary} />
+                          <Text style={styles.primaryBtnText}>Confirm Entry</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[styles.primaryBtn, styles.primaryBtnFlex]}
+                      onPress={scanNext}
+                      testID="scan-again-btn"
+                    >
+                      <Ionicons name="scan" size={18} color={colors.onBrandPrimary} />
+                      <Text style={styles.primaryBtnText}>Scan next</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </>
             )}
-            {result?.ok && result?.attendee_name && (
+          </View>
+        </View>
+      </Modal>
+
+      {/* Success (post check-in) modal */}
+      <Modal visible={!!confirmed} transparent animationType="fade" onRequestClose={scanNext}>
+        <View style={styles.modalBg}>
+          <View style={styles.successCard}>
+            <View style={styles.successIcon}>
+              <Ionicons name="checkmark" size={40} color="#FFFFFF" />
+            </View>
+            <Text style={styles.successTitle}>Welcome!</Text>
+            <Text style={styles.successSub}>{confirmed?.event_title}</Text>
+            {confirmed?.attendee_name && (
               <View style={styles.attendeeRow}>
                 <Ionicons name="person-outline" size={16} color={colors.onSurfaceTertiary} />
-                <Text style={styles.attendeeName}>{result.attendee_name}</Text>
+                <Text style={styles.attendeeName}>{confirmed.attendee_name}</Text>
               </View>
             )}
-            {result?.booking && (
-              <Text style={styles.bookingLine}>
-                {result.booking.seats?.length
-                  ? `Seats · ${result.booking.seats.join(", ")}`
-                  : result.booking.num_seats
-                  ? `${result.booking.num_seats} × ticket`
-                  : result.booking.time_slot || ""}
-              </Text>
-            )}
-            {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status === "paid" && (
-              <View style={styles.paidPill}>
-                <Ionicons name="shield-checkmark" size={14} color={colors.brand} />
-                <Text style={styles.paidText}>Paid online · ₹{result.booking.total_price.toFixed(0)}</Text>
-              </View>
-            )}
-            {result?.booking?.total_price > 0 && !result.already_checked_in && result?.booking?.payment_status !== "paid" && (
-              <View style={styles.payPill}>
-                <Ionicons name="wallet-outline" size={14} color={colors.warning} />
-                <Text style={styles.payText}>Collect ₹{result.booking.total_price.toFixed(0)} at venue</Text>
-              </View>
-            )}
-            {result?.error && <Text style={styles.errorText}>{result.error}</Text>}
-
-            <Pressable style={styles.scanBtn} onPress={scanAgain} testID="scan-again-btn">
+            <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-next-btn">
               <Ionicons name="scan" size={16} color={colors.onBrandPrimary} />
-              <Text style={styles.scanBtnText}>Scan next ticket</Text>
+              <Text style={styles.primaryBtnText}>Scan next ticket</Text>
             </Pressable>
           </View>
         </View>
@@ -214,7 +407,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
   headerTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface },
-  headerTitleLight: { fontSize: 18, fontWeight: "600", color: colors.surface },
+  headerTitleLight: { fontSize: 18, fontWeight: "600", color: "#FFFFFF" },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: colors.surfaceTertiary,
@@ -254,50 +447,115 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   bl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: radius.md },
   br: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: radius.md },
   frameHint: {
-    color: colors.surface, fontSize: 14,
+    color: "#FFFFFF", fontSize: 14,
     backgroundColor: "rgba(0,0,0,0.55)",
     paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill,
   },
+
+  loadingOverlay: {
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: "center", justifyContent: "center",
+  },
+  loadingCard: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.lg, paddingVertical: 12, borderRadius: radius.pill,
+    ...shadows.floating,
+  },
+  loadingText: { color: colors.onSurface, fontWeight: "600", fontSize: 14 },
 
   modalBg: {
     flex: 1, backgroundColor: "rgba(17,24,39,0.6)",
     alignItems: "center", justifyContent: "center", padding: spacing.xl,
   },
-  resultCard: {
+  verifyCard: {
+    width: "100%", backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.lg, padding: spacing.xl,
+    gap: spacing.sm, ...shadows.floating,
+  },
+  statusHero: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    paddingVertical: 14, borderRadius: radius.md,
+    marginBottom: spacing.sm,
+  },
+  statusHeroText: {
+    color: "#FFFFFF", fontSize: 18, fontWeight: "700", letterSpacing: 0.3,
+  },
+  eventTitle: {
+    fontSize: 15, fontWeight: "600", color: colors.onSurface,
+    textAlign: "center", marginBottom: spacing.sm,
+  },
+  rowBlock: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.surfaceTertiary,
+    padding: spacing.md, borderRadius: radius.md,
+  },
+  rowIcon: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  rowLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
+  rowValue: { fontSize: 15, color: colors.onSurface, fontWeight: "600", marginTop: 2 },
+  rowSub: { fontSize: 12, color: colors.onSurfaceTertiary, marginTop: 2 },
+
+  collectBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "#FEF3C7",
+    padding: spacing.md, borderRadius: radius.md,
+    marginTop: spacing.xs,
+  },
+  collectText: { color: "#92400E", fontSize: 13, fontWeight: "600", flex: 1 },
+  checkedInHint: {
+    fontSize: 13, color: colors.muted, textAlign: "center",
+    marginTop: spacing.xs,
+  },
+
+  actionsRow: {
+    flexDirection: "row", gap: spacing.sm, marginTop: spacing.md,
+  },
+  primaryBtn: {
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xl, paddingVertical: 14,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    alignSelf: "stretch",
+  },
+  primaryBtnFlex: { flex: 1, paddingHorizontal: spacing.md },
+  primaryBtnText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: 16 },
+  secondaryBtn: {
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xl, paddingVertical: 14,
+    alignItems: "center", justifyContent: "center",
+    minWidth: 100,
+  },
+  secondaryBtnText: { color: colors.onSurface, fontWeight: "600", fontSize: 15 },
+
+  errorText: { color: colors.error, fontSize: 14, textAlign: "center", marginTop: 4 },
+
+  // Success modal
+  successCard: {
     width: "100%", backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg, padding: spacing.xl,
     alignItems: "center", gap: spacing.sm, ...shadows.floating,
   },
-  resultIcon: {
+  successIcon: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: colors.brandPrimary,
     alignItems: "center", justifyContent: "center", marginBottom: spacing.md,
   },
-  resultTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface },
-  resultSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
+  successTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface },
+  successSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
   attendeeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.sm },
   attendeeName: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
-  bookingLine: { fontSize: 13, color: colors.onSurfaceTertiary, marginTop: 4 },
-  payPill: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "#FEF3C7", paddingHorizontal: spacing.md, paddingVertical: 8,
-    borderRadius: radius.pill, marginTop: spacing.md,
-  },
-  payText: { color: "#92400E", fontSize: 13, fontWeight: "600" },
-  paidPill: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: colors.brandTertiary, paddingHorizontal: spacing.md, paddingVertical: 8,
-    borderRadius: radius.pill, marginTop: spacing.md,
-  },
-  paidText: { color: colors.onBrandTertiary, fontSize: 13, fontWeight: "600" },
-  errorText: { color: colors.error, fontSize: 14, textAlign: "center", marginTop: 4 },
-  scanBtn: {
-    marginTop: spacing.md,
+  resultIcon: {
+    width: 72, height: 72, borderRadius: 36,
     backgroundColor: colors.brandPrimary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.xl, paddingVertical: 14,
-    alignSelf: "stretch",
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    alignItems: "center", justifyContent: "center",
+    alignSelf: "center",
+    marginBottom: spacing.md,
   },
-  scanBtnText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+  resultTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  resultSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
 });

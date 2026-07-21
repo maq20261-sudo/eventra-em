@@ -89,6 +89,8 @@ export const api = {
     request(`/events/${id}/feature`, { method: "POST", body: JSON.stringify({ tier }) }, true),
 
   // Check-in
+  checkInPreview: (bookingId: string) =>
+    request(`/checkin/preview`, { method: "POST", body: JSON.stringify({ booking_id: bookingId }) }, true),
   checkIn: (bookingId: string) =>
     request(`/checkin`, { method: "POST", body: JSON.stringify({ booking_id: bookingId }) }, true),
 

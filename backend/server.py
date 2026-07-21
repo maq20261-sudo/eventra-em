@@ -531,9 +531,8 @@ async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_
 class CheckInRequest(BaseModel):
     booking_id: str
 
-@api_router.post("/checkin")
-async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organizer"))):
-    b = await db.bookings.find_one({"id": body.booking_id}, {"_id": 0})
+async def _load_booking_for_organizer(booking_id: str, user: dict):
+    b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not b:
         raise HTTPException(status_code=404, detail="Ticket not found")
     event = await db.events.find_one({"id": b["event_id"]}, {"_id": 0})
@@ -541,6 +540,29 @@ async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organ
         raise HTTPException(status_code=404, detail="Event not found")
     if event["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="This ticket belongs to a different organizer")
+    return b, event
+
+@api_router.post("/checkin/preview")
+async def checkin_preview(body: CheckInRequest, user=Depends(require_role("organizer"))):
+    """Return booking + attendee details without checking in.
+    Used by the scanner to show a confirmation prompt to the organizer.
+    """
+    b, event = await _load_booking_for_organizer(body.booking_id, user)
+    attendee = await db.users.find_one({"id": b["user_id"]}, {"_id": 0})
+    return {
+        "ok": True,
+        "cancelled": b.get("status") == "cancelled",
+        "already_checked_in": bool(b.get("checked_in")),
+        "checked_in_at": b.get("checked_in_at"),
+        "booking": b,
+        "event_title": event["title"],
+        "attendee_name": attendee.get("name") if attendee else None,
+        "attendee_email": attendee.get("email") if attendee else None,
+    }
+
+@api_router.post("/checkin")
+async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organizer"))):
+    b, event = await _load_booking_for_organizer(body.booking_id, user)
     if b.get("status") == "cancelled":
         raise HTTPException(status_code=400, detail="This booking was cancelled")
     if b.get("checked_in"):
