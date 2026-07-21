@@ -152,59 +152,31 @@ class TestFeatureTiers:
 # ---- Feature/boost event ----
 
 class TestFeatureEvent:
-    def test_boost_event_success(self, api, organizer_headers, owned_event):
+    """SEC-001 fix: /feature endpoint no longer grants free boosts.
+    Real boosts must go through /payments/create_order + /payments/verify
+    (covered in test_payments.py). These tests verify the endpoint is
+    disabled for both organizers (402) and consumers (403 via role check).
+    """
+
+    def test_boost_endpoint_requires_payment(self, api, organizer_headers, owned_event):
         r = api.post(f"{BASE_URL}/api/events/{owned_event['id']}/feature",
                      json={"tier": "24h"}, headers=organizer_headers)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        assert data["ok"] is True
-        assert data["amount_charged"] == 4.99
-        assert data["featured_until"]
-        # verify future
-        fu = datetime.fromisoformat(data["featured_until"])
-        assert fu > datetime.now(timezone.utc)
-        pytest.first_featured_until = data["featured_until"]
-
-        # verify is_featured true on event
+        # 402 Payment Required — organizer cannot boost without paying
+        assert r.status_code == 402, r.text
+        # Event should NOT be featured
         g = api.get(f"{BASE_URL}/api/events/{owned_event['id']}")
         assert g.status_code == 200
-        assert g.json()["is_featured"] is True
-        assert g.json()["featured_until"] == data["featured_until"]
-
-    def test_boost_stacks_time(self, api, organizer_headers, owned_event):
-        # Second boost with 7d should extend from previous featured_until, not now
-        prev = datetime.fromisoformat(pytest.first_featured_until)
-        r = api.post(f"{BASE_URL}/api/events/{owned_event['id']}/feature",
-                     json={"tier": "7d"}, headers=organizer_headers)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        new_until = datetime.fromisoformat(data["featured_until"])
-        # 7 days = 168 hours added on top of prev; should be within a few seconds
-        delta_hours = (new_until - prev).total_seconds() / 3600
-        assert 167.5 < delta_hours < 168.5, f"expected ~168h stack, got {delta_hours}"
+        assert g.json().get("is_featured") is False
 
     def test_boost_wrong_organizer(self, api, other_organizer, owned_event):
         r = api.post(f"{BASE_URL}/api/events/{owned_event['id']}/feature",
                      json={"tier": "24h"}, headers=other_organizer["headers"])
-        assert r.status_code == 403
+        # Now returns 402 (payment required) - ownership check is moot when the
+        # endpoint is universally gated.
+        assert r.status_code == 402
 
     def test_boost_consumer_forbidden(self, api, consumer_headers, owned_event):
         r = api.post(f"{BASE_URL}/api/events/{owned_event['id']}/feature",
                      json={"tier": "24h"}, headers=consumer_headers)
+        # Role check runs first — consumer still gets 403.
         assert r.status_code == 403
-
-    def test_featured_event_appears_first(self, api, owned_event):
-        # Query events at same location — our boosted event should be first
-        r = api.get(f"{BASE_URL}/api/events",
-                    params={"lat": SF_LAT, "lng": SF_LNG, "radius_km": 20})
-        assert r.status_code == 200
-        events = r.json()
-        assert len(events) >= 2
-        # Find our event
-        our = next((e for e in events if e["id"] == owned_event["id"]), None)
-        assert our is not None, "boosted event not in list"
-        assert our["is_featured"] is True
-        # It must be at position 0 (or at least before any non-featured)
-        assert events[0]["id"] == owned_event["id"], \
-            f"expected boosted event first, got {events[0]['id']} vs {owned_event['id']}"
-        assert events[0]["is_featured"] is True

@@ -236,7 +236,8 @@ class TestBookings:
         r = api.post(f"{BASE_URL}/api/bookings",
                      json={"event_id": pytest.seat_map_event_id, "seats": ["A1"]},
                      headers=consumer_headers)
-        assert r.status_code == 400
+        # SEC-003: conflicting reservations now return 409 (was 400).
+        assert r.status_code == 409
 
     def test_book_general(self, api, consumer_headers):
         r = api.post(f"{BASE_URL}/api/bookings",
@@ -250,7 +251,7 @@ class TestBookings:
         r = api.post(f"{BASE_URL}/api/bookings",
                      json={"event_id": pytest.general_event_id, "num_seats": 10},
                      headers=consumer_headers)
-        assert r.status_code == 400
+        assert r.status_code == 409
 
     def test_book_time_slot(self, api, consumer_headers):
         r = api.post(f"{BASE_URL}/api/bookings",
@@ -263,7 +264,7 @@ class TestBookings:
         r = api.post(f"{BASE_URL}/api/bookings",
                      json={"event_id": pytest.time_slot_event_id, "time_slot": "09:00"},
                      headers=consumer_headers)
-        assert r.status_code == 400
+        assert r.status_code == 409
 
     def test_organizer_cannot_book(self, api, organizer_headers):
         r = api.post(f"{BASE_URL}/api/bookings",

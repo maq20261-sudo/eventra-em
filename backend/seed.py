@@ -1,6 +1,13 @@
-"""Seed script to populate demo events for testing."""
+"""Seed script to populate demo events for testing.
+
+SEC-002 fix: demo passwords are only auto-set when a safe environment
+signal is present. In production this script requires an explicit
+`SEED_DEMO_PASSWORD` env var, and refuses to run without it.
+"""
 import asyncio
 import os
+import secrets
+import string
 import uuid
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,9 +20,41 @@ load_dotenv(ROOT_DIR / '.env')
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
+def _resolve_demo_password() -> str:
+    """Return the password to use for seeded demo accounts.
+
+    Priority:
+      1) Explicit `SEED_DEMO_PASSWORD` env var (any environment).
+      2) In non-production (`APP_ENV` unset or != "production"): default
+         to the well-known `password123` so local development stays easy.
+      3) In production without `SEED_DEMO_PASSWORD`: generate a random
+         one-off password, print it once to the console, and use it —
+         so a deploy never ships known credentials.
+    """
+    override = os.environ.get("SEED_DEMO_PASSWORD")
+    if override:
+        return override
+
+    app_env = os.environ.get("APP_ENV", "development").lower()
+    if app_env != "production":
+        return "password123"
+
+    # Production without override: generate a per-run password.
+    alphabet = string.ascii_letters + string.digits
+    pwd = "".join(secrets.choice(alphabet) for _ in range(24))
+    print("=" * 72)
+    print(f"[seed] Generated one-off demo password (production): {pwd}")
+    print("[seed] Set SEED_DEMO_PASSWORD to control this value in future.")
+    print("=" * 72)
+    return pwd
+
+
 async def main():
     client = AsyncIOMotorClient(os.environ['MONGO_URL'])
     db = client[os.environ['DB_NAME']]
+
+    demo_password = _resolve_demo_password()
 
     # Wipe demo data
     await db.users.delete_many({"email": {"$in": ["demo@organizer.com", "demo@consumer.com"]}})
@@ -29,7 +68,7 @@ async def main():
         "email": "demo@organizer.com",
         "name": "Aria Events Co.",
         "role": "organizer",
-        "password_hash": pwd_context.hash("password123"),
+        "password_hash": pwd_context.hash(demo_password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -40,7 +79,7 @@ async def main():
         "email": "demo@consumer.com",
         "name": "Sam Rivera",
         "role": "consumer",
-        "password_hash": pwd_context.hash("password123"),
+        "password_hash": pwd_context.hash(demo_password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 

@@ -33,6 +33,18 @@ type Props = {
 };
 
 function buildHtml(order: RzpOrder): string {
+  // SEC-004: JSON.stringify escapes for a JS context but the HTML parser
+  // still terminates a <script> block on a literal `</script>` sequence.
+  // Escape `<` (and by extension `</script>`) so a stored event title
+  // cannot break out of the script and inject markup.
+  const jsSafe = (s: string) =>
+    JSON.stringify(s)
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e")
+      .replace(/&/g, "\\u0026")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -60,15 +72,15 @@ function buildHtml(order: RzpOrder): string {
     }
     function startPayment() {
       var options = {
-        key: ${JSON.stringify(order.razorpay_key_id)},
+        key: ${jsSafe(order.razorpay_key_id)},
         amount: ${order.amount_paise},
-        currency: ${JSON.stringify(order.currency)},
-        order_id: ${JSON.stringify(order.razorpay_order_id)},
+        currency: ${jsSafe(order.currency)},
+        order_id: ${jsSafe(order.razorpay_order_id)},
         name: "GatherSpace",
-        description: ${JSON.stringify(order.description)},
+        description: ${jsSafe(order.description)},
         prefill: {
-          name: ${JSON.stringify(order.prefill.name)},
-          email: ${JSON.stringify(order.prefill.email)}
+          name: ${jsSafe(order.prefill.name)},
+          email: ${jsSafe(order.prefill.email)}
         },
         theme: { color: "#059669" },
         modal: {

@@ -85,8 +85,6 @@ export const api = {
 
   // Feature/Boost
   getFeatureTiers: (id: string) => request(`/events/${id}/feature-tiers`, { method: "GET" }),
-  featureEvent: (id: string, tier: "24h" | "7d" | "30d") =>
-    request(`/events/${id}/feature`, { method: "POST", body: JSON.stringify({ tier }) }, true),
 
   // Check-in
   checkInPreview: (bookingId: string) =>

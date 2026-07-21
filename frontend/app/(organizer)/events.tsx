@@ -64,36 +64,20 @@ export default function OrganizerEvents() {
     setBoostLoading(tier);
     setBoostError(null);
     try {
-      // Try Razorpay checkout first
-      try {
-        const order = await api.createPaymentOrder({
-          kind: "boost",
-          boost_event_id: boostEvent.id,
-          tier,
-        });
-        setRzpOrder(order as any);
-        setRzpVisible(true);
-        setBoostLoading(null);
-        return;
-      } catch (payErr: any) {
-        const msg = payErr?.message || "";
-        if (msg.includes("not configured") || msg.includes("503")) {
-          // fall through to simulated boost
-        } else {
-          setBoostError(msg);
-          setBoostLoading(null);
-          return;
-        }
+      const order = await api.createPaymentOrder({
+        kind: "boost",
+        boost_event_id: boostEvent.id,
+        tier,
+      });
+      setRzpOrder(order as any);
+      setRzpVisible(true);
+    } catch (payErr: any) {
+      const msg = payErr?.message || "";
+      if (msg.includes("not configured") || msg.includes("503")) {
+        setBoostError("Payments are not configured. Boost requires an active Razorpay account.");
+      } else {
+        setBoostError(msg || "Could not start payment");
       }
-
-      // Simulated boost (payments not configured)
-      const res = await api.featureEvent(boostEvent.id, tier);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setBoostSuccess(`Boosted for ₹${res.amount_charged.toFixed(0)} (simulated)`);
-      setBoostEvent(null);
-      await load();
-      setTimeout(() => setBoostSuccess(null), 2500);
-    } catch {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setBoostLoading(null);

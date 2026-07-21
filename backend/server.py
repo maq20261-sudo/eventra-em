@@ -4,13 +4,16 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import math
 import hmac
 import hashlib
+import base64
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, model_validator
 from typing import List, Optional, Literal, Any, Dict
+from collections import defaultdict, deque
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
@@ -24,7 +27,16 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "gatherspace-secret-key-change-me-in-prod")
+# SEC hardening: fail-closed on missing JWT secret in production.
+APP_ENV = os.environ.get("APP_ENV", "development").lower()
+_JWT_SECRET_ENV = os.environ.get("JWT_SECRET_KEY")
+if not _JWT_SECRET_ENV:
+    if APP_ENV == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY is required in production. Refusing to start with a default secret."
+        )
+    _JWT_SECRET_ENV = "gatherspace-dev-only-secret-do-not-use-in-prod"
+SECRET_KEY = _JWT_SECRET_ENV
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
@@ -40,6 +52,45 @@ security = HTTPBearer()
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# SEC-hardening: simple per-IP rate limiting for sensitive endpoints
+# (login, register, payment initiation & verification). Bypasses when
+# `DISABLE_RATE_LIMIT=1` in local test envs.
+_RATE_LIMITS: Dict[str, Dict[str, Any]] = {
+    "/api/auth/login": {"max": 8, "window_s": 60},
+    "/api/auth/register": {"max": 5, "window_s": 60},
+    "/api/payments/create_order": {"max": 15, "window_s": 60},
+    "/api/payments/verify": {"max": 30, "window_s": 60},
+}
+_RATE_STATE: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(deque))
+_RL_DISABLED = os.environ.get("DISABLE_RATE_LIMIT", "").lower() in ("1", "true", "yes")
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request, call_next):
+    if _RL_DISABLED:
+        return await call_next(request)
+    cfg = _RATE_LIMITS.get(request.url.path)
+    if cfg and request.method == "POST":
+        client_ip = (request.client.host if request.client else "unknown")
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            client_ip = fwd.split(",")[0].strip() or client_ip
+        bucket = _RATE_STATE[request.url.path][client_ip]
+        now = datetime.now(timezone.utc).timestamp()
+        window = cfg["window_s"]
+        while bucket and (now - bucket[0]) > window:
+            bucket.popleft()
+        if len(bucket) >= cfg["max"]:
+            from fastapi.responses import JSONResponse
+            retry_after = int(window - (now - bucket[0])) if bucket else window
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please slow down."},
+                headers={"Retry-After": str(max(1, retry_after))},
+            )
+        bucket.append(now)
+    return await call_next(request)
 
 # ---------- Models ----------
 
@@ -64,35 +115,77 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserOut
 
+# SEC-hardening: shared image validator — cap base64/data URIs at 3 MiB
+# decoded to prevent MongoDB document bloat / DoS via oversized banners.
+_MAX_IMAGE_BYTES = 3 * 1024 * 1024  # 3 MiB decoded
+
+
+def _validate_image_url(value: Optional[str]) -> Optional[str]:
+    if value is None or value == "":
+        return value
+    if not isinstance(value, str):
+        raise ValueError("image_url must be a string")
+    if len(value) > 8 * 1024 * 1024:  # 8 MB raw string safeguard
+        raise ValueError("image_url is too large")
+    if value.startswith("data:"):
+        try:
+            header, b64 = value.split(",", 1)
+        except ValueError as e:
+            raise ValueError("Invalid data URI") from e
+        if not header.startswith("data:image/") or ";base64" not in header:
+            raise ValueError("Only base64-encoded images are accepted for uploads")
+        # Estimate decoded size cheaply from base64 length.
+        approx_bytes = (len(b64) * 3) // 4
+        if approx_bytes > _MAX_IMAGE_BYTES:
+            raise ValueError("Image exceeds 3 MB. Please upload a smaller image.")
+        try:
+            base64.b64decode(b64[:64] + "==", validate=False)  # sanity check header
+        except Exception as e:
+            raise ValueError("Invalid base64 image data") from e
+    elif not (value.startswith("http://") or value.startswith("https://")):
+        raise ValueError("image_url must be an http(s) URL or a data:image/* base64 URI")
+    return value
+
+
 class EventCreate(BaseModel):
-    title: str
-    description: str
-    category: str  # Music, Art, Tech, Food, Sports, Other
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=5000)
+    category: str = Field(min_length=1, max_length=64)  # Music, Art, Tech, Food, Sports, Other
     image_url: Optional[str] = None
     date: str  # ISO
-    location_name: str
-    latitude: float
-    longitude: float
-    price: float = 0.0
+    location_name: str = Field(min_length=1, max_length=200)
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+    price: float = Field(default=0.0, ge=0.0, le=10_000_000.0)
     booking_type: Literal["seat_map", "general", "time_slot"]
     # For seat_map
-    seat_rows: Optional[int] = None
-    seat_cols: Optional[int] = None
+    seat_rows: Optional[int] = Field(default=None, ge=1, le=100)
+    seat_cols: Optional[int] = Field(default=None, ge=1, le=100)
     # For general
-    total_seats: Optional[int] = None
+    total_seats: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     # For time_slot
     time_slots: Optional[List[str]] = None  # list of ISO times or labels
 
+    @model_validator(mode="after")
+    def _validate_image(self):
+        self.image_url = _validate_image_url(self.image_url)
+        return self
+
 class EventUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, min_length=1, max_length=5000)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=64)
     image_url: Optional[str] = None
     date: Optional[str] = None
-    location_name: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    price: Optional[float] = None
+    location_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    price: Optional[float] = Field(default=None, ge=0.0, le=10_000_000.0)
+
+    @model_validator(mode="after")
+    def _validate_image(self):
+        self.image_url = _validate_image_url(self.image_url)
+        return self
 
 class EventOut(BaseModel):
     id: str
@@ -282,7 +375,11 @@ async def list_events(
     if category and category != "All":
         query["category"] = category
     if search:
-        query["title"] = {"$regex": search, "$options": "i"}
+        # SEC-hardening: escape user input to prevent ReDoS / regex injection,
+        # cap length, and search only via case-insensitive substring match.
+        safe = re.escape(search.strip())[:128]
+        if safe:
+            query["title"] = {"$regex": safe, "$options": "i"}
     events = await db.events.find(query, {"_id": 0}).to_list(500)
     results = []
     for e in events:
@@ -365,42 +462,66 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # Validate seat availability
-    if event["booking_type"] == "seat_map":
+    # SEC-003 fix: compute price + units up front, then perform an ATOMIC
+    # capacity/uniqueness check via `findOneAndUpdate` on the events doc.
+    # Two concurrent bookings can no longer both pass a stale read.
+    booking_id = str(uuid.uuid4())
+    booking_type = event["booking_type"]
+
+    if booking_type == "seat_map":
         if not body.seats:
             raise HTTPException(status_code=400, detail="Please select seats")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
-        taken = set()
-        for b in existing:
-            if b.get("seats"):
-                taken.update(b["seats"])
-        for s in body.seats:
-            if s in taken:
-                raise HTTPException(status_code=400, detail=f"Seat {s} already booked")
+        # Enforce per-seat uniqueness atomically: only proceed if none of the
+        # requested seats are already in `booked_seats`.
         total_price = event["price"] * len(body.seats)
         num_units = len(body.seats)
-    elif event["booking_type"] == "general":
+        cond = {
+            "id": body.event_id,
+            "booked_seats": {"$not": {"$elemMatch": {"$in": body.seats}}},
+        }
+        upd = {
+            "$inc": {"booked_count": num_units},
+            "$push": {"booked_seats": {"$each": body.seats}},
+        }
+        result = await db.events.find_one_and_update(cond, upd)
+        if not result:
+            raise HTTPException(status_code=409, detail="One or more selected seats were just booked. Please pick different seats.")
+
+    elif booking_type == "general":
         if not body.num_seats or body.num_seats < 1:
             raise HTTPException(status_code=400, detail="Please choose number of seats")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
-        booked = sum(b.get("num_seats", 0) for b in existing)
-        if booked + body.num_seats > (event.get("total_seats") or 0):
-            raise HTTPException(status_code=400, detail="Not enough seats available")
         total_price = event["price"] * body.num_seats
         num_units = body.num_seats
-    elif event["booking_type"] == "time_slot":
+        capacity = int(event.get("total_seats") or 0)
+        # Atomic capacity check: increment booked_count only if it wouldn't exceed capacity.
+        cond = {
+            "id": body.event_id,
+            "$expr": {"$lte": [{"$add": [{"$ifNull": ["$booked_count", 0]}, num_units]}, capacity]},
+        }
+        upd = {"$inc": {"booked_count": num_units}}
+        result = await db.events.find_one_and_update(cond, upd)
+        if not result:
+            raise HTTPException(status_code=409, detail="Not enough seats available")
+
+    elif booking_type == "time_slot":
         if not body.time_slot:
             raise HTTPException(status_code=400, detail="Please pick a time slot")
-        existing = await db.bookings.find({"event_id": body.event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
-        taken_slots = {b.get("time_slot") for b in existing}
-        if body.time_slot in taken_slots:
-            raise HTTPException(status_code=400, detail="Time slot already booked")
         total_price = event["price"]
         num_units = 1
+        cond = {
+            "id": body.event_id,
+            "booked_slots": {"$ne": body.time_slot},
+        }
+        upd = {
+            "$inc": {"booked_count": num_units},
+            "$push": {"booked_slots": body.time_slot},
+        }
+        result = await db.events.find_one_and_update(cond, upd)
+        if not result:
+            raise HTTPException(status_code=409, detail="Time slot already booked")
     else:
         raise HTTPException(status_code=400, detail="Invalid booking type")
 
-    booking_id = str(uuid.uuid4())
     doc = {
         "id": booking_id,
         "event_id": body.event_id,
@@ -414,8 +535,17 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         "payment": payment,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.bookings.insert_one(doc)
-    await db.events.update_one({"id": body.event_id}, {"$inc": {"booked_count": num_units}})
+    try:
+        await db.bookings.insert_one(doc)
+    except Exception:
+        # Roll back the reservation if the booking insert fails.
+        rollback: Dict[str, Any] = {"$inc": {"booked_count": -num_units}}
+        if booking_type == "seat_map":
+            rollback["$pullAll"] = {"booked_seats": body.seats}
+        elif booking_type == "time_slot":
+            rollback["$pull"] = {"booked_slots": body.time_slot}
+        await db.events.update_one({"id": body.event_id}, rollback)
+        raise
 
     return BookingOut(
         id=booking_id,
@@ -523,8 +653,14 @@ async def _apply_boost(event_id: str, user: dict, tier: str, payment: Optional[D
 
 @api_router.post("/events/{event_id}/feature")
 async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_role("organizer"))):
-    # Simulated (no payment) — kept for backward compat / dev testing.
-    return await _apply_boost(event_id, user, body.tier, payment=None)
+    """SEC-001 fix: This endpoint no longer grants free boosts.
+    Organizers must go through the paid `/payments/create_order` +
+    `/payments/verify` flow. Kept for API back-compat.
+    """
+    raise HTTPException(
+        status_code=402,
+        detail="Payment required. Use /api/payments/create_order with kind='boost' to boost an event.",
+    )
 
 # ---------- Check-in (QR) ----------
 
@@ -857,12 +993,29 @@ async def root():
 # Include the router in the main app
 app.include_router(api_router)
 
+# SEC-hardening: explicit CORS allowlist (no wildcard + credentials contradiction).
+# Configure via `CORS_ORIGINS` env (comma-separated) or fall back to preview
+# hostnames that are safe to allow.
+_default_origins = [
+    "http://localhost:3000",
+    "http://localhost:19006",
+    "http://localhost:8081",
+]
+_env_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+_allowed_origins = _env_origins or _default_origins
+# Match Expo/EAS preview URLs and Emergent preview subdomains via regex.
+_allowed_origin_regex = os.environ.get(
+    "CORS_ORIGIN_REGEX",
+    r"^https://.*\.(preview\.emergentagent\.com|emergentagent\.com|exp\.direct|expo\.dev)$",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=_allowed_origin_regex,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    max_age=600,
 )
 
 logging.basicConfig(
@@ -870,6 +1023,51 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def _startup_indexes_and_backfill():
+    """SEC-003: enforce uniqueness at the DB layer and backfill legacy data."""
+    try:
+        await db.events.create_index("id", unique=True)
+        await db.bookings.create_index("id", unique=True)
+        await db.bookings.create_index([("event_id", 1), ("user_id", 1)])
+        await db.users.create_index("email", unique=True)
+        await db.payment_intents.create_index("id", unique=True)
+        await db.payment_intents.create_index("razorpay_order_id")
+        logger.info("Indexes ensured.")
+    except Exception as e:  # pragma: no cover - best-effort
+        logger.warning("Index creation warning: %s", e)
+
+    # Backfill booked_seats / booked_slots on events for legacy bookings so
+    # the atomic conditional booking check has an accurate baseline.
+    try:
+        events_missing = await db.events.find(
+            {"$or": [{"booked_seats": {"$exists": False}}, {"booked_slots": {"$exists": False}}]},
+            {"_id": 0, "id": 1, "booking_type": 1},
+        ).to_list(2000)
+        for ev in events_missing:
+            eid = ev["id"]
+            bookings = await db.bookings.find(
+                {"event_id": eid, "status": {"$in": ["confirmed", "checked_in"]}},
+                {"_id": 0, "seats": 1, "time_slot": 1},
+            ).to_list(5000)
+            seats: list = []
+            slots: list = []
+            for b in bookings:
+                if b.get("seats"):
+                    seats.extend(b["seats"])
+                if b.get("time_slot"):
+                    slots.append(b["time_slot"])
+            await db.events.update_one(
+                {"id": eid},
+                {"$set": {"booked_seats": seats, "booked_slots": slots}},
+            )
+        if events_missing:
+            logger.info("Backfilled booked_seats/slots for %d event(s).", len(events_missing))
+    except Exception as e:  # pragma: no cover
+        logger.warning("Backfill warning: %s", e)
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
