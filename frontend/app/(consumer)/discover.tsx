@@ -16,6 +16,15 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withSequence,
+  withTiming,
+  interpolate,
+  Extrapolation,
+} from "react-native-reanimated";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,22 +35,16 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
-const CATEGORIES: { key: string; label: string; icon: any; color: string; image: string }[] = [
-  { key: "All", label: "All", icon: "sparkles", color: "#059669",
-    image: "https://images.unsplash.com/photo-1545150665-c72a8f0cf311?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHxwYXJ0eSUyMGV2ZW50fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6",
-    image: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwxfHxjb25jZXJ0fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316",
-    image: "https://images.pexels.com/photos/9221307/pexels-photo-9221307.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Tech", label: "Tech", icon: "hardware-chip", color: "#0EA5E9",
-    image: "https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHx0ZWNoJTIwY29uZmVyZW5jZXxlbnwwfHx8fDE3ODQ0ODE5NTV8MA&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Food", label: "Food", icon: "restaurant", color: "#EF4444",
-    image: "https://images.pexels.com/photos/31071253/pexels-photo-31071253.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Sports", label: "Sports", icon: "basketball", color: "#14B8A6",
-    image: "https://images.unsplash.com/photo-1599158150601-1417ebbaafdd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHw0fHxzdGFkaXVtfGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Other", label: "Other", icon: "grid", color: "#64748B",
-    image: "https://images.pexels.com/photos/2263436/pexels-photo-2263436.jpeg?auto=compress&cs=tinysrgb&w=400" },
+const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
+  { key: "All", label: "All", icon: "sparkles-outline", color: "#EF4444" },
+  { key: "Music", label: "Music", icon: "musical-notes-outline", color: "#8B5CF6" },
+  { key: "Art", label: "Art", icon: "color-palette-outline", color: "#F97316" },
+  { key: "Tech", label: "Tech", icon: "hardware-chip-outline", color: "#0EA5E9" },
+  { key: "Food", label: "Food", icon: "restaurant-outline", color: "#EF4444" },
+  { key: "Sports", label: "Sports", icon: "basketball-outline", color: "#14B8A6" },
+  { key: "Other", label: "Other", icon: "grid-outline", color: "#64748B" },
 ];
+
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -66,6 +69,91 @@ type Event = {
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+}
+
+/**
+ * Animated category chip in BookMyShow style — a clean icon-first tile.
+ * Behaviour:
+ *   - Idle → soft surface with subtle shadow.
+ *   - Selected → scales up ~6%, gets a colored border + halo, icon flips to accent color.
+ *   - On press → quick scale-down bounce for tactile feedback.
+ *   - When newly selected → icon does a small rotation "wiggle".
+ */
+function CategoryChip({
+  icon, label, accent, active, onPress, testID, styles, colors,
+}: {
+  icon: any;
+  label: string;
+  accent: string;
+  active: boolean;
+  onPress: () => void;
+  testID?: string;
+  styles: any;
+  colors: Colors;
+}) {
+  const scale = useSharedValue(1);
+  const highlight = useSharedValue(active ? 1 : 0);
+  const wiggle = useSharedValue(0);
+
+  useEffect(() => {
+    highlight.value = withTiming(active ? 1 : 0, { duration: 220 });
+    scale.value = withSpring(active ? 1.06 : 1, { damping: 12, stiffness: 220 });
+    if (active) {
+      wiggle.value = withSequence(
+        withTiming(-1, { duration: 90 }),
+        withTiming(1, { duration: 120 }),
+        withSpring(0, { damping: 10 })
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const bgStyle = useAnimatedStyle(() => {
+    const bg = interpolate(highlight.value, [0, 1], [0, 1], Extrapolation.CLAMP);
+    return {
+      backgroundColor: bg > 0.5 ? accent + "1A" /* ~10% tint */ : colors.surfaceSecondary,
+      borderColor: bg > 0.5 ? accent : "transparent",
+    };
+  });
+
+  const iconAnim = useAnimatedStyle(() => ({
+    transform: [
+      { rotate: `${wiggle.value * 8}deg` },
+      { scale: interpolate(highlight.value, [0, 1], [1, 1.1], Extrapolation.CLAMP) },
+    ],
+  }));
+
+  const handlePress = () => {
+    scale.value = withSequence(
+      withTiming(0.92, { duration: 80 }),
+      withSpring(active ? 1.06 : 1, { damping: 10, stiffness: 240 })
+    );
+    onPress();
+  };
+
+  const iconColor = active ? accent : colors.onSurface;
+
+  return (
+    <Animated.View style={[styles.chipShadow, containerStyle]}>
+      <Pressable onPress={handlePress} testID={testID} style={styles.chipPress}>
+        <Animated.View style={[styles.chipCard, bgStyle]}>
+          <Animated.View style={iconAnim}>
+            <Ionicons name={icon} size={30} color={iconColor} />
+          </Animated.View>
+        </Animated.View>
+        <Text
+          style={[styles.chipLabel, active && { color: accent, fontWeight: "700" }]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
 }
 
 function formatTime(iso: string) {
@@ -300,40 +388,22 @@ export default function Discover() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.catRow}
         >
-          {CATEGORIES.map((c) => {
-            const active = category === c.key;
-            return (
-              <View key={c.key} style={styles.catCardShadow}>
-                <Pressable
-                  testID={`chip-${c.key}`}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setCategory(c.key);
-                  }}
-                  style={[styles.catCard, { backgroundColor: c.color }, active && styles.catCardActive]}
-                >
-                  <Image
-                    source={c.image}
-                    style={StyleSheet.absoluteFill}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    transition={0}
-                    recyclingKey={c.key}
-                  />
-                  <View style={styles.catOverlay} />
-                  <View style={styles.catIconWrap}>
-                    <Ionicons name={c.icon} size={20} color="#FFFFFF" />
-                  </View>
-                  {active && (
-                    <View style={styles.catCheck}>
-                      <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
-                    </View>
-                  )}
-                  <Text style={styles.catCardLabel} numberOfLines={1}>{c.label}</Text>
-                </Pressable>
-              </View>
-            );
-          })}
+          {CATEGORIES.map((c) => (
+            <CategoryChip
+              key={c.key}
+              testID={`chip-${c.key}`}
+              icon={c.icon}
+              label={c.label}
+              accent={c.color}
+              active={category === c.key}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setCategory(c.key);
+              }}
+              styles={styles}
+              colors={colors}
+            />
+          ))}
         </ScrollView>
       </View>
 
@@ -553,41 +623,31 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginTop: spacing.sm,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
-  catRow: { gap: spacing.md, paddingVertical: spacing.md, paddingRight: spacing.lg },
-  catCardShadow: {
-    // Outer wrapper carries the shadow ONLY.
-    // Do NOT set overflow:hidden here — it triggers a well-known
-    // Android bug (RN #30039) where elevation + overflow:hidden
-    // hides absolutely-positioned children on some devices.
-    borderRadius: radius.md,
+  catRow: { gap: spacing.md, paddingVertical: spacing.md, paddingRight: spacing.lg, alignItems: "flex-start" },
+  chipShadow: {
+    // Outer wrapper carries the shadow only (Android RN #30039 workaround).
+    alignItems: "center",
+    width: 76,
+  },
+  chipPress: {
+    alignItems: "center",
+  },
+  chipCard: {
+    width: 64, height: 64,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    backgroundColor: colors.surfaceSecondary,
     ...shadows.card,
   },
-  catCard: {
-    width: 96, height: 76,
-    borderRadius: radius.md,
-    overflow: "hidden",
-    justifyContent: "flex-end",
-    padding: spacing.sm,
-    flexShrink: 0,
-  },
-  catCardActive: {
-    borderWidth: 2, borderColor: colors.brand,
-  },
-  catOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.35)",
-  },
-  catIconWrap: {
-    position: "absolute", top: 8, left: 8,
-  },
-  catCardLabel: {
-    color: "#FFFFFF", fontSize: 13, fontWeight: "700",
-  },
-  catCheck: {
-    position: "absolute", top: 6, right: 6,
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: colors.brand,
-    alignItems: "center", justifyContent: "center",
+  chipLabel: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.onSurface,
+    fontWeight: "500",
+    textAlign: "center",
+    maxWidth: 76,
   },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
