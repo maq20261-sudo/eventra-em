@@ -785,10 +785,11 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingBottom: spacing.md,
     backgroundColor: colors.surface,
     borderBottomColor: colors.divider,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
   },
   headerRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm },
-  greeting: { fontSize: 28, fontWeight: "700", color: colors.onSurface, marginBottom: 4 },
+  greeting: { fontSize: 32, fontWeight: "800", color: colors.onSurface, marginBottom: 4, letterSpacing: -0.6 },
   locPill: {
     flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
   },

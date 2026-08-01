@@ -29,52 +29,52 @@ export type Colors = {
 };
 
 export const LIGHT_COLORS: Colors = {
-  surface: "#F9FAFB",
-  onSurface: "#111827",
+  surface: "#F5F5F7",
+  onSurface: "#0F0F1A",
   surfaceSecondary: "#FFFFFF",
-  onSurfaceSecondary: "#111827",
-  surfaceTertiary: "#F3F4F6",
-  onSurfaceTertiary: "#374151",
-  surfaceInverse: "#1F2937",
-  onSurfaceInverse: "#F9FAFB",
-  brand: "#059669",
-  brandPrimary: "#059669",
+  onSurfaceSecondary: "#0F0F1A",
+  surfaceTertiary: "#EEEEF3",
+  onSurfaceTertiary: "#3D3D4D",
+  surfaceInverse: "#0F0F14",
+  onSurfaceInverse: "#F5F5F7",
+  brand: "#F84464",
+  brandPrimary: "#F84464",
   onBrandPrimary: "#FFFFFF",
-  brandSecondary: "#10B981",
-  brandTertiary: "#D1FAE5",
-  onBrandTertiary: "#065F46",
-  success: "#059669",
-  warning: "#D97706",
-  error: "#DC2626",
+  brandSecondary: "#DC1F3F",
+  brandTertiary: "#FCE7EE",
+  onBrandTertiary: "#B0102F",
+  success: "#10B981",
+  warning: "#F59E0B",
+  error: "#EF4444",
   info: "#4B5563",
-  border: "#E5E7EB",
-  borderStrong: "#D1D5DB",
-  divider: "#F3F4F6",
+  border: "#E4E4EC",
+  borderStrong: "#D0D0DC",
+  divider: "#EEEEF3",
   muted: "#6B7280",
 };
 
 export const DARK_COLORS: Colors = {
-  surface: "#0B0F14",
-  onSurface: "#F9FAFB",
-  surfaceSecondary: "#111827",
-  onSurfaceSecondary: "#F9FAFB",
-  surfaceTertiary: "#1F2937",
-  onSurfaceTertiary: "#D1D5DB",
-  surfaceInverse: "#F9FAFB",
-  onSurfaceInverse: "#111827",
-  brand: "#10B981",
-  brandPrimary: "#10B981",
-  onBrandPrimary: "#02231A",
-  brandSecondary: "#34D399",
-  brandTertiary: "#064E3B",
-  onBrandTertiary: "#A7F3D0",
-  success: "#10B981",
+  surface: "#0F0F14",
+  onSurface: "#F5F5F7",
+  surfaceSecondary: "#181822",
+  onSurfaceSecondary: "#F5F5F7",
+  surfaceTertiary: "#22222E",
+  onSurfaceTertiary: "#D0D0DC",
+  surfaceInverse: "#F5F5F7",
+  onSurfaceInverse: "#0F0F14",
+  brand: "#F84464",
+  brandPrimary: "#F84464",
+  onBrandPrimary: "#FFFFFF",
+  brandSecondary: "#FF6B85",
+  brandTertiary: "#3A1420",
+  onBrandTertiary: "#FFCAD4",
+  success: "#22C55E",
   warning: "#F59E0B",
   error: "#F87171",
   info: "#9CA3AF",
-  border: "#1F2937",
-  borderStrong: "#374151",
-  divider: "#1F2937",
+  border: "#22222E",
+  borderStrong: "#3A3A4A",
+  divider: "#22222E",
   muted: "#9CA3AF",
 };
 
@@ -90,7 +90,9 @@ const ThemeContext = createContext<Ctx | undefined>(undefined);
 const STORAGE_KEY = "gs_theme_mode";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>("light");
+  // Default to dark — the BookMyShow-inspired brand feels most alive on the
+  // deep charcoal surface. Users can flip to light in Profile.
+  const [mode, setModeState] = useState<ThemeMode>("dark");
 
   useEffect(() => {
     (async () => {
