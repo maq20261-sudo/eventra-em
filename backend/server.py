@@ -430,8 +430,45 @@ async def delete_event(event_id: str, user=Depends(require_role("organizer"))):
     await db.events.delete_one({"id": event_id})
     return {"ok": True}
 
+async def _reconcile_event_availability(event_id: str) -> dict:
+    """Rebuild `booked_seats`, `booked_slots`, and `booked_count` on the event
+    doc based on the actual bookings collection — the source of truth. This
+    self-heals any drift caused by stale data or aborted rollbacks so the
+    atomic booking guard is always consistent with the seat-availability view.
+    Returns the reconciled event doc (or None if missing).
+    """
+    bookings = await db.bookings.find(
+        {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}},
+        {"_id": 0, "seats": 1, "time_slot": 1, "num_seats": 1},
+    ).to_list(5000)
+    booked_seats: list = []
+    booked_slots: list = []
+    booked_count = 0
+    for b in bookings:
+        if b.get("seats"):
+            booked_seats.extend(b["seats"])
+            booked_count += len(b["seats"])
+        if b.get("time_slot"):
+            booked_slots.append(b["time_slot"])
+            booked_count += 1
+        if b.get("num_seats"):
+            booked_count += int(b["num_seats"] or 0)
+    return await db.events.find_one_and_update(
+        {"id": event_id},
+        {"$set": {
+            "booked_seats": booked_seats,
+            "booked_slots": booked_slots,
+            "booked_count": booked_count,
+        }},
+        return_document=True,
+    )
+
+
 @api_router.get("/events/{event_id}/booked-seats")
 async def get_booked_seats(event_id: str):
+    # Self-heal on read so the frontend seat map and the atomic booking
+    # guard always see the same source of truth.
+    await _reconcile_event_availability(event_id)
     bookings = await db.bookings.find({"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
     booked_seats = []
     booked_slots = []
@@ -465,62 +502,77 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
     # SEC-003 fix: compute price + units up front, then perform an ATOMIC
     # capacity/uniqueness check via `findOneAndUpdate` on the events doc.
     # Two concurrent bookings can no longer both pass a stale read.
+    #
+    # Additionally, to guard against drift between event.booked_seats/slots
+    # and the bookings collection (source of truth), we reconcile on failure
+    # and retry once — this eliminates a class of "seat just booked" false
+    # rejections caused by stale array state.
     booking_id = str(uuid.uuid4())
     booking_type = event["booking_type"]
 
-    if booking_type == "seat_map":
-        if not body.seats:
-            raise HTTPException(status_code=400, detail="Please select seats")
-        # Enforce per-seat uniqueness atomically: only proceed if none of the
-        # requested seats are already in `booked_seats`.
-        total_price = event["price"] * len(body.seats)
-        num_units = len(body.seats)
-        cond = {
-            "id": body.event_id,
-            "booked_seats": {"$not": {"$elemMatch": {"$in": body.seats}}},
-        }
-        upd = {
-            "$inc": {"booked_count": num_units},
-            "$push": {"booked_seats": {"$each": body.seats}},
-        }
-        result = await db.events.find_one_and_update(cond, upd)
-        if not result:
-            raise HTTPException(status_code=409, detail="One or more selected seats were just booked. Please pick different seats.")
+    async def _try_reserve():
+        if booking_type == "seat_map":
+            if not body.seats:
+                raise HTTPException(status_code=400, detail="Please select seats")
+            price = event["price"] * len(body.seats)
+            units = len(body.seats)
+            cond = {
+                "id": body.event_id,
+                "booked_seats": {"$not": {"$elemMatch": {"$in": body.seats}}},
+            }
+            upd = {
+                "$inc": {"booked_count": units},
+                "$push": {"booked_seats": {"$each": body.seats}},
+            }
+            return price, units, await db.events.find_one_and_update(cond, upd)
 
-    elif booking_type == "general":
-        if not body.num_seats or body.num_seats < 1:
-            raise HTTPException(status_code=400, detail="Please choose number of seats")
-        total_price = event["price"] * body.num_seats
-        num_units = body.num_seats
-        capacity = int(event.get("total_seats") or 0)
-        # Atomic capacity check: increment booked_count only if it wouldn't exceed capacity.
-        cond = {
-            "id": body.event_id,
-            "$expr": {"$lte": [{"$add": [{"$ifNull": ["$booked_count", 0]}, num_units]}, capacity]},
-        }
-        upd = {"$inc": {"booked_count": num_units}}
-        result = await db.events.find_one_and_update(cond, upd)
-        if not result:
-            raise HTTPException(status_code=409, detail="Not enough seats available")
+        if booking_type == "general":
+            if not body.num_seats or body.num_seats < 1:
+                raise HTTPException(status_code=400, detail="Please choose number of seats")
+            price = event["price"] * body.num_seats
+            units = body.num_seats
+            capacity = int(event.get("total_seats") or 0)
+            cond = {
+                "id": body.event_id,
+                "$expr": {"$lte": [{"$add": [{"$ifNull": ["$booked_count", 0]}, units]}, capacity]},
+            }
+            upd = {"$inc": {"booked_count": units}}
+            return price, units, await db.events.find_one_and_update(cond, upd)
 
-    elif booking_type == "time_slot":
-        if not body.time_slot:
-            raise HTTPException(status_code=400, detail="Please pick a time slot")
-        total_price = event["price"]
-        num_units = 1
-        cond = {
-            "id": body.event_id,
-            "booked_slots": {"$ne": body.time_slot},
-        }
-        upd = {
-            "$inc": {"booked_count": num_units},
-            "$push": {"booked_slots": body.time_slot},
-        }
-        result = await db.events.find_one_and_update(cond, upd)
-        if not result:
-            raise HTTPException(status_code=409, detail="Time slot already booked")
-    else:
+        if booking_type == "time_slot":
+            if not body.time_slot:
+                raise HTTPException(status_code=400, detail="Please pick a time slot")
+            price = event["price"]
+            units = 1
+            cond = {
+                "id": body.event_id,
+                "booked_slots": {"$ne": body.time_slot},
+            }
+            upd = {
+                "$inc": {"booked_count": units},
+                "$push": {"booked_slots": body.time_slot},
+            }
+            return price, units, await db.events.find_one_and_update(cond, upd)
+
         raise HTTPException(status_code=400, detail="Invalid booking type")
+
+    total_price, num_units, result = await _try_reserve()
+    if not result:
+        # Reconcile the event's booked_* arrays from the bookings collection
+        # (truth) and retry ONCE. This heals stale data without allowing
+        # oversell — the truth-based reconcile means honest conflicts still
+        # fail, but false conflicts (drift) now succeed.
+        await _reconcile_event_availability(body.event_id)
+        event = await db.events.find_one({"id": body.event_id}, {"_id": 0}) or event
+        total_price, num_units, result = await _try_reserve()
+
+    if not result:
+        if booking_type == "seat_map":
+            raise HTTPException(status_code=409, detail="One or more selected seats were just booked. Please pick different seats.")
+        if booking_type == "general":
+            raise HTTPException(status_code=409, detail="Not enough seats available")
+        if booking_type == "time_slot":
+            raise HTTPException(status_code=409, detail="Time slot already booked")
 
     doc = {
         "id": booking_id,
@@ -1039,34 +1091,19 @@ async def _startup_indexes_and_backfill():
     except Exception as e:  # pragma: no cover - best-effort
         logger.warning("Index creation warning: %s", e)
 
-    # Backfill booked_seats / booked_slots on events for legacy bookings so
-    # the atomic conditional booking check has an accurate baseline.
+    # Reconcile booked_seats / booked_slots / booked_count on ALL events from
+    # the bookings collection (source of truth). Runs on every startup so any
+    # drift from aborted transactions or stale data is self-healed.
     try:
-        events_missing = await db.events.find(
-            {"$or": [{"booked_seats": {"$exists": False}}, {"booked_slots": {"$exists": False}}]},
-            {"_id": 0, "id": 1, "booking_type": 1},
-        ).to_list(2000)
-        for ev in events_missing:
-            eid = ev["id"]
-            bookings = await db.bookings.find(
-                {"event_id": eid, "status": {"$in": ["confirmed", "checked_in"]}},
-                {"_id": 0, "seats": 1, "time_slot": 1},
-            ).to_list(5000)
-            seats: list = []
-            slots: list = []
-            for b in bookings:
-                if b.get("seats"):
-                    seats.extend(b["seats"])
-                if b.get("time_slot"):
-                    slots.append(b["time_slot"])
-            await db.events.update_one(
-                {"id": eid},
-                {"$set": {"booked_seats": seats, "booked_slots": slots}},
-            )
-        if events_missing:
-            logger.info("Backfilled booked_seats/slots for %d event(s).", len(events_missing))
+        all_events = await db.events.find({}, {"_id": 0, "id": 1}).to_list(5000)
+        healed = 0
+        for ev in all_events:
+            await _reconcile_event_availability(ev["id"])
+            healed += 1
+        if healed:
+            logger.info("Reconciled booked_* arrays for %d event(s).", healed)
     except Exception as e:  # pragma: no cover
-        logger.warning("Backfill warning: %s", e)
+        logger.warning("Reconcile warning: %s", e)
 
 
 @app.on_event("shutdown")
