@@ -22,6 +22,7 @@ import Animated, {
   withSpring,
   withSequence,
   withTiming,
+  withRepeat,
   interpolate,
   Extrapolation,
 } from "react-native-reanimated";
@@ -64,11 +65,41 @@ type Event = {
   booking_type: string;
   distance_km?: number | null;
   is_featured?: boolean;
+  booked_count?: number;
+  total_seats?: number | null;
+  seat_rows?: number | null;
+  seat_cols?: number | null;
+  time_slots?: string[] | null;
 };
 
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+}
+
+/**
+ * Compute an optional "hot ribbon" for an event card.
+ * Priority: LIVE (starts within 2h or already started but < 12h ago) > SELLING FAST (>75% booked).
+ */
+function computeRibbon(e: Event): { label: string; color: string } | null {
+  try {
+    const now = Date.now();
+    const start = new Date(e.date).getTime();
+    const diffH = (start - now) / (1000 * 60 * 60);
+    if (diffH > -12 && diffH <= 2) {
+      return { label: "LIVE", color: "#EF4444" };
+    }
+    // Capacity
+    let capacity = 0;
+    if (e.booking_type === "seat_map") capacity = (e.seat_rows || 0) * (e.seat_cols || 0);
+    else if (e.booking_type === "general") capacity = e.total_seats || 0;
+    else if (e.booking_type === "time_slot") capacity = (e.time_slots || []).length;
+    if (capacity > 0) {
+      const ratio = (e.booked_count || 0) / capacity;
+      if (ratio >= 0.75) return { label: "SELLING FAST", color: "#F97316" };
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
 /**
@@ -140,7 +171,20 @@ function CategoryChip({
   return (
     <Animated.View style={[styles.chipShadow, containerStyle]}>
       <Pressable onPress={handlePress} testID={testID} style={styles.chipPress}>
-        <Animated.View style={[styles.chipCard, bgStyle]}>
+        <Animated.View
+          style={[
+            styles.chipCard,
+            bgStyle,
+            active && {
+              // Colored halo on the selected chip. Native uses shadow*, web/Android also picks these up.
+              shadowColor: accent,
+              shadowOpacity: 0.55,
+              shadowRadius: 14,
+              shadowOffset: { width: 0, height: 0 },
+              elevation: 10,
+            },
+          ]}
+        >
           <Animated.View style={iconAnim}>
             <Ionicons name={icon} size={30} color={iconColor} />
           </Animated.View>
@@ -176,9 +220,38 @@ function PosterCard({
   colors: Colors;
 }) {
   const scale = useSharedValue(1);
+  const pulse = useSharedValue(0);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const onPressIn = () => { scale.value = withSpring(0.96, { damping: 12 }); };
   const onPressOut = () => { scale.value = withSpring(1, { damping: 10 }); };
+
+  const ribbon = computeRibbon(event);
+
+  useEffect(() => {
+    if (ribbon) {
+      pulse.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 700 }),
+          withTiming(0, { duration: 700 })
+        ),
+        -1,
+        false
+      );
+    } else {
+      pulse.value = 0;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!ribbon]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulse.value, [0, 1], [0.7, 1], Extrapolation.CLAMP),
+    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.06], Extrapolation.CLAMP) }],
+  }));
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulse.value, [0, 1], [1, 0.4], Extrapolation.CLAMP),
+    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.35], Extrapolation.CLAMP) }],
+  }));
+
   return (
     <Animated.View style={[styles.posterShadow, animStyle]}>
       <Pressable
@@ -205,6 +278,12 @@ function PosterCard({
           <View style={[styles.posterBadge, { backgroundColor: badgeColor || colors.brandPrimary }]}>
             <Text style={styles.posterBadgeText}>{badge}</Text>
           </View>
+        )}
+        {ribbon && (
+          <Animated.View style={[styles.posterRibbon, { backgroundColor: ribbon.color }, pulseStyle]}>
+            <Animated.View style={[styles.ribbonDot, dotStyle]} />
+            <Text style={styles.ribbonText}>{ribbon.label}</Text>
+          </Animated.View>
         )}
         <View style={styles.posterPricePill}>
           <Text style={styles.posterPriceText}>
@@ -505,8 +584,15 @@ export default function Discover() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {/* Sticky header */}
+      {/* Sticky header w/ subtle brand gradient behind */}
       <View style={styles.header}>
+        <LinearGradient
+          colors={[colors.brandTertiary, "transparent"]}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          pointerEvents="none"
+        />
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.greeting}>Discover</Text>
@@ -783,6 +869,24 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   posterBadgeText: {
     color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 0.5,
+  },
+  posterRibbon: {
+    position: "absolute", bottom: 96, left: 10,
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 8, paddingVertical: 5,
+    borderRadius: radius.pill,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  ribbonDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: "#FFFFFF",
+  },
+  ribbonText: {
+    color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 0.6,
   },
   posterPricePill: {
     position: "absolute", top: 10, right: 10,
