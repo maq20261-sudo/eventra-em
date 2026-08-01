@@ -264,10 +264,12 @@ class BookingOut(BaseModel):
     time_slot: Optional[str] = None
     total_price: float
     status: str  # confirmed / cancelled / checked_in
-    payment_status: str = "free"  # paid / unpaid / free
+    payment_status: str = "free"  # paid / unpaid / free / refunded / refund_pending / refund_failed
     checked_in: bool = False
     checked_in_at: Optional[str] = None
     created_at: str
+    cancelled_at: Optional[str] = None
+    refund: Optional[Dict[str, Any]] = None  # {status, id, amount, provider, processed_at, note}
 
 # ---------- Helpers ----------
 
@@ -886,16 +888,171 @@ async def my_bookings(user=Depends(get_current_user)):
             checked_in=b.get("checked_in", False),
             checked_in_at=b.get("checked_in_at"),
             created_at=b["created_at"],
+            cancelled_at=b.get("cancelled_at"),
+            refund=b.get("refund"),
         ))
     return out
 
+# ---------- Cancel policy ----------
+CANCEL_CUTOFF_HOURS = int(os.environ.get("CANCEL_CUTOFF_HOURS", "2"))
+
+async def _release_booking_inventory(booking: dict) -> None:
+    """Free up the seats / slots / count that this booking was holding so a
+    cancellation makes room for other users to book."""
+    event_id = booking["event_id"]
+    if booking.get("seats"):
+        await db.events.update_one(
+            {"id": event_id},
+            {"$pullAll": {"booked_seats": booking["seats"]}},
+        )
+    if booking.get("num_seats"):
+        await db.events.update_one(
+            {"id": event_id},
+            {"$inc": {"booked_count": -int(booking["num_seats"])}},
+        )
+    if booking.get("time_slot"):
+        # Some events have multi-user slots (many can book the same slot). We
+        # only remove the slot from booked_slots if no other CONFIRMED booking
+        # is still holding it — otherwise other users lose their reservation.
+        slot = booking["time_slot"]
+        still_held = await db.bookings.count_documents({
+            "event_id": event_id,
+            "time_slot": slot,
+            "id": {"$ne": booking["id"]},
+            "status": {"$in": ["confirmed", "checked_in"]},
+        })
+        if still_held == 0:
+            await db.events.update_one(
+                {"id": event_id},
+                {"$pull": {"booked_slots": slot}},
+            )
+
+def _cancellation_error(reason: str, code: int = 400) -> HTTPException:
+    return HTTPException(status_code=code, detail=reason)
+
+async def _issue_razorpay_refund(payment: dict) -> Dict[str, Any]:
+    """Fire a normal-speed refund via Razorpay. Returns a refund record with
+    a status of `processed` (T+5–7 days settlement) or `refund_failed`."""
+    pay_id = payment.get("payment_id")
+    amount_paise = int(payment.get("amount_paise") or round(float(payment.get("amount_inr", 0)) * 100))
+    if not pay_id or amount_paise <= 0:
+        return {
+            "status": "refund_failed",
+            "provider": "razorpay",
+            "error": "Missing payment id or amount",
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    if not _RZP_CONFIGURED:
+        return {
+            "status": "refund_failed",
+            "provider": "razorpay",
+            "error": "Razorpay not configured on server",
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    try:
+        # `speed=normal` → T+5–7 business days, no surcharge.
+        # Razorpay SDK is sync; run in a thread pool to avoid blocking loop.
+        import asyncio
+        loop = asyncio.get_running_loop()
+        refund = await loop.run_in_executor(
+            None,
+            lambda: rzp_client.payment.refund(pay_id, {"amount": amount_paise, "speed": "normal"}),
+        )
+        return {
+            "status": "refund_pending",  # money is on the way back over 5-7 days
+            "provider": "razorpay",
+            "id": refund.get("id"),
+            "amount_paise": refund.get("amount", amount_paise),
+            "amount_inr": (refund.get("amount", amount_paise)) / 100.0,
+            "speed": refund.get("speed_requested", "normal"),
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "note": "Refund initiated. It typically reflects in 5-7 business days.",
+        }
+    except Exception as e:
+        return {
+            "status": "refund_failed",
+            "provider": "razorpay",
+            "error": str(e),
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "note": "Automatic refund failed. Our team will process it manually within 24 hours.",
+        }
+
 @api_router.post("/bookings/{booking_id}/cancel")
 async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
+    """Cancel a confirmed booking and, if it was paid online, initiate a
+    refund back to the user's original payment method via Razorpay."""
     b = await db.bookings.find_one({"id": booking_id})
     if not b or b["user_id"] != user["id"]:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    await db.bookings.update_one({"id": booking_id}, {"$set": {"status": "cancelled"}})
-    return {"ok": True}
+        raise _cancellation_error("Booking not found", code=404)
+    if b.get("status") == "cancelled":
+        raise _cancellation_error("This booking is already cancelled")
+    if b.get("checked_in"):
+        raise _cancellation_error("This ticket has already been used and cannot be cancelled")
+
+    # Enforce time-based cancellation window (default 2h before start).
+    event = await db.events.find_one({"id": b["event_id"]})
+    if not event:
+        raise _cancellation_error("Event not found", code=404)
+    try:
+        event_start = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
+        if event_start.tzinfo is None:
+            event_start = event_start.replace(tzinfo=timezone.utc)
+    except Exception:
+        event_start = None
+    now = datetime.now(timezone.utc)
+    if event_start and event_start < now:
+        raise _cancellation_error("The event has already started or ended; cancellations are closed.")
+    if event_start and (event_start - now).total_seconds() < CANCEL_CUTOFF_HOURS * 3600:
+        raise _cancellation_error(
+            f"Cancellations are closed within {CANCEL_CUTOFF_HOURS} hours of the event start time."
+        )
+
+    now_iso = now.isoformat()
+    update_doc: Dict[str, Any] = {
+        "status": "cancelled",
+        "cancelled_at": now_iso,
+    }
+
+    # 1. Free inventory FIRST so another user can grab the seat immediately.
+    await _release_booking_inventory(b)
+
+    # 2. If the booking was paid online, initiate refund via Razorpay.
+    payment = b.get("payment") or {}
+    was_paid_online = (
+        b.get("payment_status") == "paid"
+        and payment.get("provider") == "razorpay"
+        and payment.get("payment_id")
+    )
+    if was_paid_online:
+        refund = await _issue_razorpay_refund(payment)
+        update_doc["refund"] = refund
+        # Update payment_status based on refund outcome.
+        if refund.get("status") == "refund_pending":
+            update_doc["payment_status"] = "refund_pending"
+        elif refund.get("status") == "refund_failed":
+            update_doc["payment_status"] = "refund_failed"
+    else:
+        # Not paid online — no money to return, so no refund object.
+        # (Free events / pay-at-venue tickets simply get cancelled.)
+        pass
+
+    await db.bookings.update_one({"id": booking_id}, {"$set": update_doc})
+
+    # Return the fresh booking so the client shows the refund state.
+    fresh = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    return {
+        "ok": True,
+        "booking_id": booking_id,
+        "status": "cancelled",
+        "cancelled_at": now_iso,
+        "refund": fresh.get("refund"),
+        "payment_status": fresh.get("payment_status", "free" if b.get("total_price", 0) == 0 else "unpaid"),
+        "message": (
+            "Booking cancelled. Refund initiated — reflects in 5-7 business days."
+            if fresh.get("refund", {}).get("status") == "refund_pending"
+            else "Booking cancelled."
+        ),
+    }
 
 # ---------- Feature/Boost ----------
 

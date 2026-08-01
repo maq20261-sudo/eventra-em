@@ -19,6 +19,9 @@ type Booking = {
   time_slot?: string;
   total_price: number;
   status: string;
+  payment_status?: string;
+  cancelled_at?: string;
+  refund?: { status?: string; amount_inr?: number; id?: string } | null;
   created_at: string;
 };
 
@@ -138,10 +141,27 @@ export default function MyBookings() {
                     {b.total_price > 0 ? `₹${b.total_price.toFixed(0)}` : "Free"}
                   </Text>
                 </View>
-                {b.status !== "confirmed" && (
+                {b.status === "cancelled" && (
                   <View style={styles.cancelledBadge}><Text style={styles.cancelledText}>Cancelled</Text></View>
                 )}
               </View>
+
+              {b.status === "cancelled" && b.payment_status === "refund_pending" && (
+                <View style={styles.refundRow}>
+                  <Ionicons name="time-outline" size={13} color="#92400E" />
+                  <Text style={styles.refundRowText}>
+                    Refund in progress · 5-7 business days
+                  </Text>
+                </View>
+              )}
+              {b.status === "cancelled" && b.payment_status === "refund_failed" && (
+                <View style={styles.refundRow}>
+                  <Ionicons name="warning-outline" size={13} color={colors.error} />
+                  <Text style={[styles.refundRowText, { color: colors.error }]}>
+                    Refund pending manual review
+                  </Text>
+                </View>
+              )}
             </Pressable>
           ))}
           <View style={{ height: 32 }} />
@@ -198,4 +218,11 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     backgroundColor: "#FEE2E2", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm,
   },
   cancelledText: { color: colors.error, fontSize: 11, fontWeight: "600" },
+  refundRow: {
+    marginTop: spacing.sm,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.divider,
+  },
+  refundRowText: { fontSize: 12, color: "#92400E", fontWeight: "500" },
 });
