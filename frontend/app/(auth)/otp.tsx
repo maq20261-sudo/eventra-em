@@ -18,48 +18,65 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
 import { spacing, radius } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { sendOtp, verifyOtp } from "@/src/firebase";
+import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
 
 export default function OtpScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{
-    kind: "register" | "login";
-    challenge_id: string;
-    mobile_masked: string;
-    expires_in?: string;
-  }>();
+  const params = useLocalSearchParams<{ mobile_masked?: string }>();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { signInWithToken } = useAuth();
 
-  const [challengeId, setChallengeId] = useState(String(params.challenge_id || ""));
+  const session = getPhoneSession();
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(30);
+  const [mobileMasked, setMobileMasked] = useState<string>(
+    (params.mobile_masked as string) || session?.confirmation.mobileMasked || ""
+  );
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(t);
-  }, [challengeId]);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => inputRef.current?.focus(), 200);
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    // If someone deep-links to /otp without an active session, kick them back.
+    if (!session) {
+      router.replace("/(auth)/welcome" as any);
+    }
+  }, [session, router]);
+
   const submit = async () => {
     if (otp.length < 6) {
       setError("Enter the 6-digit OTP");
       return;
     }
+    if (!session) {
+      setError("Session expired. Please restart the flow.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const call = params.kind === "register" ? api.registerVerify : api.loginVerify;
-      const res = await call({ challenge_id: challengeId, otp });
+      const idToken = await verifyOtp(session.confirmation, otp);
+      const res = await api.firebaseVerify({
+        id_token: idToken,
+        name: session.name,
+        role: session.role,
+        email: session.email,
+      });
       await signInWithToken(res.access_token, res.user);
+      clearPhoneSession();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
       else router.replace("/(consumer)/discover" as any);
@@ -72,16 +89,18 @@ export default function OtpScreen() {
   };
 
   const resend = async () => {
-    if (seconds > 0 || resending) return;
+    if (seconds > 0 || resending || !session) return;
     setResending(true);
     setError(null);
     try {
-      const res = await api.otpResend({ challenge_id: challengeId });
-      setChallengeId(res.challenge_id);
+      const rawMobile = session.mobile.replace(/\D/g, "");
+      const fresh = await sendOtp(rawMobile);
+      setPhoneSession({ ...session, confirmation: fresh });
+      setMobileMasked(fresh.mobileMasked);
       setOtp("");
       setSeconds(30);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      Alert.alert("OTP resent", `A new code was sent to ${res.mobile_masked}`);
+      Alert.alert("OTP resent", `A new code was sent to ${fresh.mobileMasked}`);
     } catch (e: any) {
       setError(e?.message || "Couldn't resend");
     } finally {
@@ -104,7 +123,7 @@ export default function OtpScreen() {
           <Text style={styles.title}>Verify your mobile</Text>
           <Text style={styles.subtitle}>
             Enter the 6-digit code sent to{"\n"}
-            <Text style={styles.mobile}>{params.mobile_masked}</Text>
+            <Text style={styles.mobile}>{mobileMasked}</Text>
           </Text>
 
           <View style={styles.otpBox}>
@@ -175,7 +194,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.md, paddingVertical: 16,
   },
-  error: { color: colors.error, marginTop: spacing.md, fontSize: 14 },
+  error: { color: colors.error, marginTop: spacing.md, fontSize: 14, textAlign: "center", paddingHorizontal: spacing.md },
   primaryBtn: {
     marginTop: spacing.xl, width: "100%",
     backgroundColor: colors.brandPrimary,

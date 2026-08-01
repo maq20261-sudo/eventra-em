@@ -19,6 +19,7 @@ from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
 import razorpay
+import firebase_admin_util as fb
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -64,6 +65,7 @@ _RATE_LIMITS: Dict[str, Dict[str, Any]] = {
     "/api/auth/login/start": {"max": 8, "window_s": 60},
     "/api/auth/login/verify": {"max": 10, "window_s": 60},
     "/api/auth/otp/resend": {"max": 3, "window_s": 60},
+    "/api/auth/firebase-verify": {"max": 10, "window_s": 60},
     "/api/payments/create_order": {"max": 15, "window_s": 60},
     "/api/payments/verify": {"max": 30, "window_s": 60},
 }
@@ -127,6 +129,14 @@ class OtpVerify(BaseModel):
 
 class OtpResend(BaseModel):
     challenge_id: str
+
+class FirebaseVerifyBody(BaseModel):
+    id_token: str
+    # Optional profile fields — used only for first-time signups so users can
+    # continue browsing as an Attendee/Organizer immediately after OTP.
+    name: Optional[str] = None
+    role: Optional[Literal["consumer", "organizer"]] = None
+    email: Optional[EmailStr] = None
 
 class UserOut(BaseModel):
     id: str
@@ -489,6 +499,81 @@ async def otp_resend(body: OtpResend):
     await db.otp_challenges.delete_one({"id": body.challenge_id})
     cid = await _send_challenge(old["kind"], old["email"], old["mobile"], extra=old.get("extra"))
     return {"challenge_id": cid, "mobile_masked": msg91.mask_mobile(old["mobile"]), "expires_in_seconds": msg91.OTP_TTL * 60}
+
+
+# ---------- Firebase Phone Auth (bypasses DLT for real production SMS) ----------
+@api_router.post("/auth/firebase-verify", response_model=TokenResponse)
+async def firebase_verify(body: FirebaseVerifyBody):
+    """Client-side flow: Expo app calls Firebase to send + verify SMS OTP, then
+    hands the resulting ID token here. We verify signature/claims via the
+    Admin SDK, then upsert the user in Mongo and mint our own JWT."""
+    if not fb.is_enabled():
+        raise HTTPException(status_code=503, detail="Firebase Admin not configured on server")
+    try:
+        claims = fb.verify_id_token(body.id_token)
+    except fb.FirebaseAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    phone_number = claims.get("phone_number")
+    firebase_uid = claims.get("uid") or claims.get("user_id")
+    if not phone_number or not firebase_uid:
+        raise HTTPException(status_code=400, detail="Firebase token missing phone number claim")
+
+    # Store phone in the same 91XXXXXXXXXX format used by the rest of the app
+    mobile_stored = phone_number.lstrip("+")
+
+    # Look up user by firebase_uid first (most reliable), then by mobile,
+    # then by email — supports users who previously registered via password.
+    user = await db.users.find_one({"firebase_uid": firebase_uid})
+    if not user:
+        user = await db.users.find_one({"mobile": mobile_stored})
+    if not user and body.email:
+        user = await db.users.find_one({"email": body.email.lower()})
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if user:
+        # Update existing account: link firebase_uid and mark mobile verified.
+        updates: dict = {
+            "firebase_uid": firebase_uid,
+            "mobile": mobile_stored,
+            "mobile_verified": True,
+            "mobile_verified_at": now_iso,
+            "last_login_at": now_iso,
+        }
+        await db.users.update_one({"id": user["id"]}, {"$set": updates})
+        user.update(updates)
+    else:
+        # First-time signup via phone. Derive a name/role/email defensively so
+        # /auth/me responses stay well-formed even if the client didn't send
+        # a name/role.
+        role = body.role or "consumer"
+        name = (body.name or f"User {mobile_stored[-4:]}").strip() or "New User"
+        email = (body.email or f"phone_{firebase_uid[:12]}@users.gatherspace.local").lower()
+
+        # Guard against a collision on the derived email (extremely unlikely).
+        if await db.users.find_one({"email": email}):
+            email = f"phone_{uuid.uuid4().hex[:10]}@users.gatherspace.local"
+
+        user = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "name": name,
+            "role": role,
+            # No password for phone-first users. Legacy password endpoints
+            # will simply refuse to sign them in via email/password.
+            "password_hash": hash_password(uuid.uuid4().hex),
+            "mobile": mobile_stored,
+            "mobile_verified": True,
+            "mobile_verified_at": now_iso,
+            "firebase_uid": firebase_uid,
+            "created_at": now_iso,
+            "auth_provider": "firebase_phone",
+        }
+        await db.users.insert_one(user)
+
+    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    return TokenResponse(access_token=token, user=_user_out(user))
 
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(user=Depends(get_current_user)):

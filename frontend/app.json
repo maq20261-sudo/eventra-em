@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl",
+      "bundleIdentifier": "com.maq.gatherspace",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find events happening near you",
         "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance",
@@ -23,7 +23,8 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.discoverbookevents.kb2hgl",
+      "package": "com.maq.gatherspace",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -58,7 +59,9 @@
         {
           "photosPermission": "Upload a cover image for your event"
         }
-      ]
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth"
     ],
     "experiments": {
       "typedRoutes": true

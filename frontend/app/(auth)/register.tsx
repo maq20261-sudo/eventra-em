@@ -14,10 +14,10 @@ import { useRouter, useLocalSearchParams, Link } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useAuth } from "@/src/AuthContext";
-import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { isPhoneAuthSupported, sendOtp, toE164India } from "@/src/firebase";
+import { setPhoneSession } from "@/src/phoneSession";
 
 export default function Register() {
   const { colors } = useTheme();
@@ -28,43 +28,46 @@ export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const { signUp } = useAuth();
+  const phoneSupported = isPhoneAuthSupported();
 
   const submit = async () => {
     setError(null);
     const cleanMobile = mobile.replace(/\D/g, "");
-    if (!name.trim() || !email.trim() || password.length < 6) {
-      setError("Fill in all fields. Password must be at least 6 characters.");
+    if (!name.trim()) {
+      setError("Please enter your name.");
       return;
     }
     if (cleanMobile.length !== 10 || !"6789".includes(cleanMobile[0])) {
-      setError("Enter a valid 10-digit Indian mobile (starting with 6/7/8/9).");
+      setError("Enter a valid 10-digit Indian mobile (starting 6/7/8/9).");
+      return;
+    }
+    if (!phoneSupported) {
+      setError(
+        "Phone verification requires an Android build. Please click Publish → Deploy → Generate build to test this flow on-device."
+      );
       return;
     }
     setLoading(true);
     try {
-      const res = await api.registerStart({
-        email: email.trim().toLowerCase(),
-        password,
-        name: name.trim(),
+      const conf = await sendOtp(cleanMobile);
+      setPhoneSession({
+        confirmation: conf,
+        kind: "register",
         role,
-        mobile: cleanMobile,
+        name: name.trim(),
+        email: email.trim().toLowerCase() || undefined,
+        mobile: toE164India(cleanMobile),
       });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       router.push({
         pathname: "/(auth)/otp" as any,
-        params: {
-          kind: "register",
-          challenge_id: res.challenge_id,
-          mobile_masked: res.mobile_masked,
-        },
+        params: { mobile_masked: conf.mobileMasked },
       });
     } catch (e: any) {
-      setError(e?.message || "Registration failed");
+      setError(e?.message || "Couldn't send OTP");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
@@ -81,6 +84,15 @@ export default function Register() {
 
           <Text style={styles.title}>Create account</Text>
           <Text style={styles.subtitle}>Join GatherSpace in seconds</Text>
+
+          {!phoneSupported && (
+            <View style={styles.infoBanner}>
+              <Ionicons name="information-circle" size={18} color={colors.brand} />
+              <Text style={styles.infoBannerText}>
+                Phone OTP works on the installed app only. In this web preview, use a demo account from the Sign In screen.
+              </Text>
+            </View>
+          )}
 
           <View style={styles.segment}>
             <Pressable
@@ -112,7 +124,26 @@ export default function Register() {
           </View>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>Mobile (India)</Text>
+            <View style={styles.mobileRow}>
+              <View style={styles.dialCode}>
+                <Text style={styles.dialCodeText}>+91</Text>
+              </View>
+              <TextInput
+                testID="mobile-input"
+                style={[styles.input, styles.mobileInput]}
+                placeholder="10-digit number"
+                placeholderTextColor={colors.muted}
+                keyboardType="phone-pad"
+                maxLength={10}
+                value={mobile}
+                onChangeText={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))}
+              />
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Email (optional)</Text>
             <TextInput
               testID="email-input"
               style={styles.input}
@@ -123,42 +154,25 @@ export default function Register() {
               value={email}
               onChangeText={setEmail}
             />
+            <Text style={styles.helperText}>Only used to send booking receipts. You can skip this.</Text>
           </View>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Mobile (India)</Text>
-            <TextInput
-              testID="mobile-input"
-              style={styles.input}
-              placeholder="10-digit number (starts 6/7/8/9)"
-              placeholderTextColor={colors.muted}
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={mobile}
-              onChangeText={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))}
-            />
-          </View>
+          {error && (
+            <Text style={styles.error} testID="register-error">
+              {error}
+            </Text>
+          )}
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              testID="password-input"
-              style={styles.input}
-              placeholder="At least 6 characters"
-              placeholderTextColor={colors.muted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-          </View>
-
-          {error && <Text style={styles.error} testID="register-error">{error}</Text>}
-
-          <Pressable style={styles.primaryBtn} onPress={submit} disabled={loading} testID="register-submit-btn">
+          <Pressable
+            style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
+            onPress={submit}
+            disabled={loading}
+            testID="register-submit-btn"
+          >
             {loading ? (
               <ActivityIndicator color={colors.onBrandPrimary} />
             ) : (
-              <Text style={styles.primaryText}>Create Account</Text>
+              <Text style={styles.primaryText}>Send OTP</Text>
             )}
           </Pressable>
 
@@ -187,6 +201,13 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   title: { fontSize: 32, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.xs },
   subtitle: { fontSize: 16, color: colors.muted, marginBottom: spacing.xl },
+  infoBanner: {
+    flexDirection: "row", alignItems: "flex-start", gap: 8,
+    backgroundColor: colors.brandTertiary,
+    padding: spacing.md, borderRadius: radius.md,
+    marginBottom: spacing.lg,
+  },
+  infoBannerText: { flex: 1, color: colors.onSurface, fontSize: 13, lineHeight: 18 },
   segment: {
     flexDirection: "row",
     backgroundColor: colors.surfaceTertiary,
@@ -200,6 +221,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   segmentTextActive: { color: colors.onSurface, fontWeight: "600" },
   field: { marginBottom: spacing.lg },
   label: { fontSize: 13, color: colors.onSurfaceTertiary, marginBottom: spacing.xs, fontWeight: "500" },
+  helperText: { fontSize: 12, color: colors.muted, marginTop: spacing.xs },
   input: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.md,
@@ -210,6 +232,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderColor: colors.border,
     borderWidth: 1,
   },
+  mobileRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dialCode: {
+    paddingHorizontal: 14, paddingVertical: 14,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.md,
+    borderColor: colors.border, borderWidth: 1,
+  },
+  dialCodeText: { fontSize: 16, fontWeight: "600", color: colors.onSurface },
+  mobileInput: { flex: 1 },
   error: {
     color: colors.error, fontSize: 14, marginBottom: spacing.md,
     backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,

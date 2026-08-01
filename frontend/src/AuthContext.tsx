@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, getToken, setToken, User } from "./api";
+import { firebaseSignOut } from "./firebase";
 
 type AuthState = {
   user: User | null;
@@ -61,6 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await setToken(null);
     setUser(null);
+    // Also clear Firebase session on native builds so the same device can
+    // sign in as a different phone number without a stale currentUser.
+    await firebaseSignOut();
   };
 
   return (

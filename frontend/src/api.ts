@@ -52,7 +52,7 @@ export const api = {
     request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => request("/auth/me", { method: "GET" }, true),
 
-  // OTP-gated auth (MSG91)
+  // OTP-gated auth (MSG91) — legacy path, still supported for demo/backcompat.
   registerStart: (body: { email: string; password: string; name: string; role: "consumer" | "organizer"; mobile: string }) =>
     request("/auth/register/start", { method: "POST", body: JSON.stringify(body) }),
   registerVerify: (body: { challenge_id: string; otp: string }) =>
@@ -63,6 +63,15 @@ export const api = {
     request("/auth/login/verify", { method: "POST", body: JSON.stringify(body) }),
   otpResend: (body: { challenge_id: string }) =>
     request("/auth/otp/resend", { method: "POST", body: JSON.stringify(body) }),
+
+  // Firebase Phone Auth — client verifies via Firebase, backend upserts user
+  // & mints our own JWT after checking the Firebase ID token.
+  firebaseVerify: (body: {
+    id_token: string;
+    name?: string;
+    role?: "consumer" | "organizer";
+    email?: string;
+  }) => request("/auth/firebase-verify", { method: "POST", body: JSON.stringify(body) }),
 
   // Events
   listEvents: (params: {
