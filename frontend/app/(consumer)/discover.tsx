@@ -37,7 +37,7 @@ import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
 const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
-  { key: "All", label: "All", icon: "sparkles-outline", color: "#EF4444" },
+  { key: "All", label: "All", icon: "sparkles-outline", color: "#F84464" },
   { key: "Music", label: "Music", icon: "musical-notes-outline", color: "#8B5CF6" },
   { key: "Art", label: "Art", icon: "color-palette-outline", color: "#F97316" },
   { key: "Tech", label: "Tech", icon: "hardware-chip-outline", color: "#0EA5E9" },
