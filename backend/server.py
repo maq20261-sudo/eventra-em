@@ -58,19 +58,27 @@ api_router = APIRouter(prefix="/api")
 # (login, register, payment initiation & verification). Bypasses when
 # `DISABLE_RATE_LIMIT=1` in local test envs.
 _RATE_LIMITS: Dict[str, Dict[str, Any]] = {
-    "/api/auth/login": {"max": 8, "window_s": 60},
-    "/api/auth/register": {"max": 5, "window_s": 60},
-    "/api/auth/register/start": {"max": 5, "window_s": 60},
-    "/api/auth/register/verify": {"max": 10, "window_s": 60},
-    "/api/auth/login/start": {"max": 8, "window_s": 60},
-    "/api/auth/login/verify": {"max": 10, "window_s": 60},
-    "/api/auth/otp/resend": {"max": 3, "window_s": 60},
-    "/api/auth/firebase-verify": {"max": 10, "window_s": 60},
-    "/api/payments/create_order": {"max": 15, "window_s": 60},
-    "/api/payments/verify": {"max": 30, "window_s": 60},
+    # These limits are per-IP per-endpoint. Values chosen to comfortably fit
+    # a real user's worst-case retry pattern (bad network + fat-finger OTP)
+    # while still stopping automated brute-force / spam.
+    "/api/auth/login": {"max": 20, "window_s": 60},
+    "/api/auth/register": {"max": 15, "window_s": 60},
+    "/api/auth/register/start": {"max": 20, "window_s": 60},
+    "/api/auth/register/verify": {"max": 30, "window_s": 60},
+    "/api/auth/login/start": {"max": 20, "window_s": 60},
+    "/api/auth/login/verify": {"max": 30, "window_s": 60},
+    "/api/auth/otp/resend": {"max": 6, "window_s": 60},
+    "/api/auth/firebase-verify": {"max": 20, "window_s": 60},
+    "/api/payments/order": {"max": 20, "window_s": 60},
+    "/api/payments/verify": {"max": 40, "window_s": 60},
+    "/api/payments/refund": {"max": 5, "window_s": 60},
 }
 _RATE_STATE: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(deque))
 _RL_DISABLED = os.environ.get("DISABLE_RATE_LIMIT", "").lower() in ("1", "true", "yes")
+# Only honour X-Forwarded-For if the deployment sits behind a trusted proxy
+# (Kubernetes ingress, CDN, etc.). Attackers can spoof this header when we
+# accept it blindly; opt in via env only in production.
+_TRUST_XFF = os.environ.get("TRUST_X_FORWARDED_FOR", "").lower() in ("1", "true", "yes")
 
 
 @app.middleware("http")
@@ -80,9 +88,10 @@ async def rate_limit_middleware(request, call_next):
     cfg = _RATE_LIMITS.get(request.url.path)
     if cfg and request.method == "POST":
         client_ip = (request.client.host if request.client else "unknown")
-        fwd = request.headers.get("x-forwarded-for")
-        if fwd:
-            client_ip = fwd.split(",")[0].strip() or client_ip
+        if _TRUST_XFF:
+            fwd = request.headers.get("x-forwarded-for")
+            if fwd:
+                client_ip = fwd.split(",")[0].strip() or client_ip
         bucket = _RATE_STATE[request.url.path][client_ip]
         now = datetime.now(timezone.utc).timestamp()
         window = cfg["window_s"]
@@ -524,13 +533,15 @@ async def firebase_verify(body: FirebaseVerifyBody):
     # Store phone in the same 91XXXXXXXXXX format used by the rest of the app
     mobile_stored = phone_number.lstrip("+")
 
-    # Look up user by firebase_uid first (most reliable), then by mobile,
-    # then by email — supports users who previously registered via password.
+    # Look up user by firebase_uid first (most reliable, both are server-side
+    # facts), then by verified mobile number from the token. We DELIBERATELY
+    # do NOT match by the caller-supplied `body.email` — that value is not
+    # verified server-side, and doing so would allow a stranger with any
+    # Firebase phone token to hijack any account by typing its email
+    # (SEC-001).
     user = await db.users.find_one({"firebase_uid": firebase_uid})
     if not user:
         user = await db.users.find_one({"mobile": mobile_stored})
-    if not user and body.email:
-        user = await db.users.find_one({"email": body.email.lower()})
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -546,20 +557,31 @@ async def firebase_verify(body: FirebaseVerifyBody):
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
         user.update(updates)
     else:
-        # First-time signup via phone. Derive a name/role/email defensively so
-        # /auth/me responses stay well-formed even if the client didn't send
-        # a name/role.
+        # First-time signup via phone. Only the verified phone number is
+        # trusted — derive a random name/email if the client didn't supply
+        # one. If they DID supply an email, we save it on the profile only
+        # as a receipt/contact hint (not usable for login) so we don't help
+        # an attacker link an existing password account by email (SEC-001).
         role = body.role or "consumer"
         name = (body.name or f"User {mobile_stored[-4:]}").strip() or "New User"
-        email = (body.email or f"phone_{firebase_uid[:12]}@users.gatherspace.local").lower()
-
-        # Guard against a collision on the derived email (extremely unlikely).
-        if await db.users.find_one({"email": email}):
-            email = f"phone_{uuid.uuid4().hex[:10]}@users.gatherspace.local"
+        # Never reuse an existing account's email; always assign a synthetic
+        # unique internal identifier for this phone-first user.
+        internal_email = f"phone_{firebase_uid[:12]}@users.gatherspace.local".lower()
+        if await db.users.find_one({"email": internal_email}):
+            internal_email = f"phone_{uuid.uuid4().hex[:10]}@users.gatherspace.local"
+        contact_email = None
+        if body.email:
+            candidate = body.email.strip().lower()
+            # Only accept the email if it isn't already tied to another user.
+            # Storing it as `contact_email` (not `email`) makes clear it isn't
+            # a login credential.
+            if not await db.users.find_one({"email": candidate}):
+                contact_email = candidate
 
         user = {
             "id": str(uuid.uuid4()),
-            "email": email,
+            "email": internal_email,
+            "contact_email": contact_email,
             "name": name,
             "role": role,
             # No password for phone-first users. Legacy password endpoints
@@ -1008,18 +1030,42 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
         )
 
     now_iso = now.isoformat()
+
+    # SEC-002: Atomically claim the cancellation. Only ONE concurrent
+    # request can flip the booking into the intermediate `cancelling` state,
+    # so double-cancels (double-refunds) become impossible even under a
+    # rapid double-click.
+    claimed = await db.bookings.find_one_and_update(
+        {
+            "id": booking_id,
+            "user_id": user["id"],
+            "status": {"$in": ["confirmed"]},
+            "checked_in": {"$ne": True},
+        },
+        {"$set": {"status": "cancelling", "cancelling_at": now_iso}},
+    )
+    if not claimed:
+        # Someone else already flipped it (or the state changed between the
+        # early checks and now). Return a friendly conflict.
+        raise _cancellation_error("This booking is already being processed. Please refresh.", code=409)
+
     update_doc: Dict[str, Any] = {
         "status": "cancelled",
         "cancelled_at": now_iso,
     }
 
     # 1. Free inventory FIRST so another user can grab the seat immediately.
-    await _release_booking_inventory(b)
+    try:
+        await _release_booking_inventory(claimed)
+    except Exception as exc:
+        # If freeing inventory fails, we still cancel; the startup reconciler
+        # will fix drift on next boot. Log for visibility.
+        logging.warning("release_booking_inventory failed for %s: %s", booking_id, exc)
 
     # 2. If the booking was paid online, initiate refund via Razorpay.
-    payment = b.get("payment") or {}
+    payment = claimed.get("payment") or {}
     was_paid_online = (
-        b.get("payment_status") == "paid"
+        claimed.get("payment_status") == "paid"
         and payment.get("provider") == "razorpay"
         and payment.get("payment_id")
     )
@@ -1031,10 +1077,6 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
             update_doc["payment_status"] = "refund_pending"
         elif refund.get("status") == "refund_failed":
             update_doc["payment_status"] = "refund_failed"
-    else:
-        # Not paid online — no money to return, so no refund object.
-        # (Free events / pay-at-venue tickets simply get cancelled.)
-        pass
 
     await db.bookings.update_one({"id": booking_id}, {"$set": update_doc})
 
@@ -1116,6 +1158,25 @@ async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_
 class CheckInRequest(BaseModel):
     booking_id: str
 
+async def _safe_booking_for_scanner(b: dict) -> dict:
+    """Trim a booking dict for the scanner UI. Strips payment ids and any
+    other sensitive fields the organizer's phone doesn't need to see."""
+    return {
+        "id": b.get("id"),
+        "event_id": b.get("event_id"),
+        "user_id": b.get("user_id"),
+        "seats": b.get("seats"),
+        "num_seats": b.get("num_seats"),
+        "time_slot": b.get("time_slot"),
+        "total_price": b.get("total_price", 0),
+        "status": b.get("status", "confirmed"),
+        "checked_in": b.get("checked_in", False),
+        "checked_in_at": b.get("checked_in_at"),
+        "cancelled_at": b.get("cancelled_at"),
+        # Only surface a coarse paid/unpaid/refunded flag — no ids/amounts.
+        "payment_status": b.get("payment_status", "free" if b.get("total_price", 0) == 0 else "unpaid"),
+    }
+
 async def _load_booking_for_organizer(booking_id: str, user: dict):
     b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not b:
@@ -1139,10 +1200,10 @@ async def checkin_preview(body: CheckInRequest, user=Depends(require_role("organ
         "cancelled": b.get("status") == "cancelled",
         "already_checked_in": bool(b.get("checked_in")),
         "checked_in_at": b.get("checked_in_at"),
-        "booking": b,
+        "booking": await _safe_booking_for_scanner(b),
         "event_title": event["title"],
         "attendee_name": attendee.get("name") if attendee else None,
-        "attendee_email": attendee.get("email") if attendee else None,
+        # Attendee email deliberately omitted from scanner responses (SEC hardening).
     }
 
 @api_router.post("/checkin")
@@ -1154,7 +1215,7 @@ async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organ
         return {
             "ok": True,
             "already_checked_in": True,
-            "booking": b,
+            "booking": await _safe_booking_for_scanner(b),
             "event_title": event["title"],
             "checked_in_at": b.get("checked_in_at"),
         }
@@ -1165,10 +1226,11 @@ async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organ
     )
     # Look up attendee name
     attendee = await db.users.find_one({"id": b["user_id"]}, {"_id": 0})
+    updated = {**b, "checked_in": True, "checked_in_at": now_iso, "status": "checked_in"}
     return {
         "ok": True,
         "already_checked_in": False,
-        "booking": {**b, "checked_in": True, "checked_in_at": now_iso, "status": "checked_in"},
+        "booking": await _safe_booking_for_scanner(updated),
         "event_title": event["title"],
         "attendee_name": attendee.get("name") if attendee else None,
         "checked_in_at": now_iso,
