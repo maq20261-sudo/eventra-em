@@ -1,0 +1,30 @@
+{
+  "summary": "Backend-only retest of the seat-booking under-report drift fix. Ran the reconcile test file (9/9 PASS) and the full backend pytest suite (68/68 PASS in 12.14s). The previously failing TestDriftHealAndRetry::test_drift_heal_still_rejects_real_conflict is now green, confirming that the pre-attempt _reconcile_event_availability() call in _perform_booking correctly heals under-report drift before the atomic guard runs, preventing the oversell. The reconcile-on-failure + retry path for over-report drift also remains intact (test_drift_is_healed_on_booking_retry PASS). Original F4/F8 seat-map bookability regressions covered by TestSeatMapBookingHappyPath and TestSeatMapTrueConflict — all green. No code changes made; verification only.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_seat_booking_reconcile.py",
+    "/app/backend/tests/test_gatherspace_api.py",
+    "/app/backend/tests/test_checkin_and_feature.py",
+    "/app/backend/tests/test_payments.py",
+    "/app/test_reports/pytest/iteration_8_reconcile.xml",
+    "/app/test_reports/pytest/iteration_8_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (68/68)", "frontend": "N/A - backend only"},
+  "seed_data_creation": "None - tests self-provision organizer/consumer accounts and events via API",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Under-report and over-report drift are both handled: _perform_booking calls _reconcile_event_availability(event_id) BEFORE the first _try_reserve() for seat_map/time_slot, and still reconciles + retries on _try_reserve failure. All 9 tests in test_seat_booking_reconcile.py plus the 59 pre-existing tests are green. No known open issues on booking flow.",
+  "rca_of_issue": "Original bug: event.booked_seats array could under-report reality when a booking existed in the bookings collection but was missing from the event doc's booked_seats. The atomic $addToSet guard on booked_seats would then succeed on first attempt for a seat that was actually taken, causing oversell. Fix (verified): pre-reconcile event.booked_seats from the source-of-truth bookings collection before the first _try_reserve() so the guard evaluates against accurate state. Post-fix, test_drift_heal_still_rejects_real_conflict simulates an under-reported doc + real conflicting booking and asserts 409 — now passing."
+}

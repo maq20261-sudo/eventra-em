@@ -556,12 +556,19 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
 
         raise HTTPException(status_code=400, detail="Invalid booking type")
 
+    # For seat_map / time_slot bookings, always reconcile the event doc's
+    # booked_seats / booked_slots from the bookings collection BEFORE the
+    # atomic guard. This closes an oversell hole: if the event doc *under*-
+    # reports a real booking (drift or partial rollback), the atomic guard's
+    # first attempt would otherwise succeed and create a duplicate. Cheap
+    # single roundtrip; safer than a retry-on-failure loop.
+    if booking_type in ("seat_map", "time_slot"):
+        event = await _reconcile_event_availability(body.event_id) or event
+
     total_price, num_units, result = await _try_reserve()
     if not result:
-        # Reconcile the event's booked_* arrays from the bookings collection
-        # (truth) and retry ONCE. This heals stale data without allowing
-        # oversell — the truth-based reconcile means honest conflicts still
-        # fail, but false conflicts (drift) now succeed.
+        # Over-reporting drift: some seats/slots are stale in the event array
+        # but no real booking exists for them. Reconcile + retry once.
         await _reconcile_event_availability(body.event_id)
         event = await db.events.find_one({"id": body.event_id}, {"_id": 0}) or event
         total_price, num_units, result = await _try_reserve()
