@@ -21,18 +21,20 @@ export default function Welcome() {
   return (
     <View style={styles.container} testID="welcome-screen">
       <Image
-        source="https://images.pexels.com/photos/894557/pexels-photo-894557.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+        source="https://images.pexels.com/photos/1540406/pexels-photo-1540406.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=1200&w=800"
         style={StyleSheet.absoluteFill}
         contentFit="cover"
       />
       <LinearGradient
-        colors={["rgba(31,41,55,0.15)", "rgba(31,41,55,0.55)", "rgba(31,41,55,0.95)"]}
+        colors={["rgba(3,15,10,0.20)", "rgba(3,15,10,0.55)", "rgba(3,15,10,0.95)"]}
         style={StyleSheet.absoluteFill}
       />
 
       <View style={styles.topRow}>
         <View style={styles.logoRow}>
-          <Ionicons name="sparkles" size={20} color={colors.surface} />
+          <View style={styles.logoBadge}>
+            <Text style={styles.logoBadgeText}>GS</Text>
+          </View>
           <Text style={styles.logoText}>GatherSpace</Text>
         </View>
       </View>
@@ -70,12 +72,34 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingTop: 64,
     paddingHorizontal: spacing.xl,
   },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  logoBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  logoBadgeText: {
+    color: colors.onBrandPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
   logoText: {
     color: colors.surface,
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 20,
+    fontWeight: "700",
     letterSpacing: 0.3,
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   bottom: {
     position: "absolute",
