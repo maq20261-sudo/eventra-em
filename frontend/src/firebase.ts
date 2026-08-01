@@ -50,7 +50,7 @@ export function maskE164(e164: string): string {
 export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
   if (!RN_FIREBASE_AUTH_AVAILABLE) {
     throw new Error(
-      "Phone verification requires an Android build. Please use the Publish → Deploy → Generate build flow and test on-device."
+      "Phone sign-in isn't available on this platform. Please open GatherSpace on your phone to continue."
     );
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports

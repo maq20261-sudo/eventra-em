@@ -46,7 +46,7 @@ export default function Register() {
     }
     if (!phoneSupported) {
       setError(
-        "Phone verification requires an Android build. Please click Publish → Deploy → Generate build to test this flow on-device."
+        "Phone sign-up isn't available on this platform. Please open GatherSpace on your phone to continue."
       );
       return;
     }
@@ -85,11 +85,11 @@ export default function Register() {
           <Text style={styles.title}>Create account</Text>
           <Text style={styles.subtitle}>Join GatherSpace in seconds</Text>
 
-          {!phoneSupported && (
+          {!phoneSupported && Platform.OS === "web" && (
             <View style={styles.infoBanner}>
               <Ionicons name="information-circle" size={18} color={colors.brand} />
               <Text style={styles.infoBannerText}>
-                Phone verification works on the installed Android app. Please open GatherSpace on your phone to create an account.
+                Phone verification only works in the installed app. Open GatherSpace on your device to sign up.
               </Text>
             </View>
           )}

@@ -122,7 +122,6 @@ export default function Profile() {
                 onChange={(v) => { setNotifPromos(v); persist("gs_notif_promos", v); }}
                 last
               />
-              <Text style={styles.hint}>Enable device permissions once the app is deployed to a build to start receiving alerts.</Text>
             </View>
           )}
 

@@ -47,7 +47,7 @@ export default function Login() {
     }
     if (!phoneSupported) {
       setError(
-        "Phone verification requires the installed Android app. Please switch to the Email tab, or open the app on your phone."
+        "Phone sign-in isn't available on this platform. Please try Email, or open GatherSpace on your phone."
       );
       return;
     }
@@ -149,11 +149,11 @@ export default function Login() {
 
           {mode === "phone" ? (
             <>
-              {!phoneSupported && (
+              {!phoneSupported && Platform.OS === "web" && (
                 <View style={styles.infoBanner}>
                   <Ionicons name="information-circle" size={18} color={colors.brand} />
                   <Text style={styles.infoBannerText}>
-                    Phone OTP works on the installed Android app. To try the app here in preview, use the Email tab.
+                    Phone OTP only works in the installed app. To try the app here in preview, use the Email tab.
                   </Text>
                 </View>
               )}
