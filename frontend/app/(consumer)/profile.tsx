@@ -155,10 +155,10 @@ export default function Profile() {
           </Pressable>
           {openSection === "help" && (
             <View style={styles.subSection}>
-              <FAQ styles={styles} q="How do I pay for a ticket?" a="For this release, payment is collected at the venue. The organizer will scan your QR ticket and confirm payment on arrival." />
-              <FAQ styles={styles} q="Can I cancel a booking?" a="Yes — open the ticket from My Tickets and use the cancel option. Cancelled tickets cannot be scanned." />
+              <FAQ styles={styles} q="How do I pay for a ticket?" a="Paid events accept online payments via Razorpay (UPI, cards, netbanking, wallets). Free events don't require any payment." />
+              <FAQ styles={styles} q="Can I cancel a booking?" a="Yes — open the ticket from My Tickets and tap Cancel. Cancellations are allowed up to 2 hours before event start. Paid tickets get a full refund to the original payment method within 5-7 business days." />
               <FAQ styles={styles} q="Why is my event not appearing on Discover?" a="Events only show within the attendee's chosen radius. Organizers can also boost an event to feature it at the top of results." />
-              <FAQ styles={styles} q="Contact us" a="support@gatherspace.app · Mon–Fri, 9am–6pm PT" last />
+              <FAQ styles={styles} q="Contact us" a="support@gatherspace.app · Mon–Fri, 10am–7pm IST" last />
             </View>
           )}
 
@@ -177,7 +177,7 @@ export default function Profile() {
                 A modern event booking platform for concerts, art shows, tech meetups, and more — with real-time seat selection, time-slot booking, and QR check-in.
               </Text>
               <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Version</Text><Text style={styles.aboutValue}>1.0.0</Text></View>
-              <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Build</Text><Text style={styles.aboutValue}>Feb 2026</Text></View>
+              <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Build</Text><Text style={styles.aboutValue}>Aug 2026</Text></View>
             </View>
           )}
         </View>

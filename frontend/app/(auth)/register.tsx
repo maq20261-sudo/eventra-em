@@ -89,7 +89,7 @@ export default function Register() {
             <View style={styles.infoBanner}>
               <Ionicons name="information-circle" size={18} color={colors.brand} />
               <Text style={styles.infoBannerText}>
-                Phone OTP works on the installed app only. In this web preview, use a demo account from the Sign In screen.
+                Phone verification works on the installed Android app. Please open GatherSpace on your phone to create an account.
               </Text>
             </View>
           )}

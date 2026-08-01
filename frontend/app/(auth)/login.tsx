@@ -47,7 +47,7 @@ export default function Login() {
     }
     if (!phoneSupported) {
       setError(
-        "Phone verification requires an Android build. Please Publish & generate a build to test on-device, or use the 'Email' tab with a demo account."
+        "Phone verification requires the installed Android app. Please switch to the Email tab, or open the app on your phone."
       );
       return;
     }
@@ -91,16 +91,6 @@ export default function Login() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fillDemo = () => {
-    if (role === "organizer") {
-      setEmail("demo@organizer.com");
-      setPassword("password123");
-    } else {
-      setEmail("demo@consumer.com");
-      setPassword("password123");
     }
   };
 
@@ -163,7 +153,7 @@ export default function Login() {
                 <View style={styles.infoBanner}>
                   <Ionicons name="information-circle" size={18} color={colors.brand} />
                   <Text style={styles.infoBannerText}>
-                    Phone OTP requires an Android build. Try the Email tab with a demo account here in preview.
+                    Phone OTP works on the installed Android app. To try the app here in preview, use the Email tab.
                   </Text>
                 </View>
               )}
@@ -218,10 +208,6 @@ export default function Login() {
               {error && <Text style={styles.error} testID="login-error">{error}</Text>}
               <Pressable style={[styles.primaryBtn, loading && { opacity: 0.6 }]} onPress={submitEmail} disabled={loading} testID="login-email-submit-btn">
                 {loading ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Sign In</Text>}
-              </Pressable>
-              <Pressable onPress={fillDemo} style={styles.demoBtn} testID="fill-demo-btn">
-                <Ionicons name="flash-outline" size={16} color={colors.brand} />
-                <Text style={styles.demoText}>Use demo {role} account</Text>
               </Pressable>
             </>
           )}
@@ -306,12 +292,6 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginTop: spacing.sm,
   },
   primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "600" },
-  demoBtn: {
-    marginTop: spacing.md,
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    paddingVertical: 12,
-  },
-  demoText: { color: colors.brand, fontSize: 14, fontWeight: "500" },
   footer: {
     marginTop: "auto",
     flexDirection: "row", justifyContent: "center", gap: 6, paddingTop: spacing.xl,

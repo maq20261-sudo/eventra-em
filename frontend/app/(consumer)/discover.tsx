@@ -45,7 +45,7 @@ const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
   { key: "Other", label: "Other", icon: "grid-outline", color: "#64748B" },
 ];
 
-const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
+const DEFAULT_LOC = { lat: 19.076, lng: 72.8777, label: "Mumbai" };
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CAROUSEL_WIDTH = Math.min(SCREEN_WIDTH - 48, 320);
