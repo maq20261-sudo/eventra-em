@@ -22,7 +22,6 @@ import Animated, {
   withSpring,
   withSequence,
   withTiming,
-  withRepeat,
   interpolate,
   Extrapolation,
 } from "react-native-reanimated";
@@ -37,13 +36,13 @@ import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
 const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
-  { key: "All", label: "All", icon: "flame", color: "#F84464" },
-  { key: "Music", label: "Music", icon: "mic", color: "#8B5CF6" },
-  { key: "Art", label: "Art", icon: "brush", color: "#F97316" },
-  { key: "Tech", label: "Tech", icon: "flash", color: "#0EA5E9" },
-  { key: "Food", label: "Food", icon: "pizza", color: "#EF4444" },
-  { key: "Sports", label: "Sports", icon: "football", color: "#14B8A6" },
-  { key: "Other", label: "Other", icon: "star", color: "#64748B" },
+  { key: "All", label: "All", icon: "sparkles-outline", color: "#EF4444" },
+  { key: "Music", label: "Music", icon: "musical-notes-outline", color: "#8B5CF6" },
+  { key: "Art", label: "Art", icon: "color-palette-outline", color: "#F97316" },
+  { key: "Tech", label: "Tech", icon: "hardware-chip-outline", color: "#0EA5E9" },
+  { key: "Food", label: "Food", icon: "restaurant-outline", color: "#EF4444" },
+  { key: "Sports", label: "Sports", icon: "basketball-outline", color: "#14B8A6" },
+  { key: "Other", label: "Other", icon: "grid-outline", color: "#64748B" },
 ];
 
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
@@ -65,41 +64,11 @@ type Event = {
   booking_type: string;
   distance_km?: number | null;
   is_featured?: boolean;
-  booked_count?: number;
-  total_seats?: number | null;
-  seat_rows?: number | null;
-  seat_cols?: number | null;
-  time_slots?: string[] | null;
 };
 
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
-}
-
-/**
- * Compute an optional "hot ribbon" for an event card.
- * Priority: LIVE (starts within 2h or already started but < 12h ago) > SELLING FAST (>75% booked).
- */
-function computeRibbon(e: Event): { label: string; color: string } | null {
-  try {
-    const now = Date.now();
-    const start = new Date(e.date).getTime();
-    const diffH = (start - now) / (1000 * 60 * 60);
-    if (diffH > -12 && diffH <= 2) {
-      return { label: "LIVE", color: "#EF4444" };
-    }
-    // Capacity
-    let capacity = 0;
-    if (e.booking_type === "seat_map") capacity = (e.seat_rows || 0) * (e.seat_cols || 0);
-    else if (e.booking_type === "general") capacity = e.total_seats || 0;
-    else if (e.booking_type === "time_slot") capacity = (e.time_slots || []).length;
-    if (capacity > 0) {
-      const ratio = (e.booked_count || 0) / capacity;
-      if (ratio >= 0.75) return { label: "SELLING FAST", color: "#F97316" };
-    }
-  } catch { /* ignore */ }
-  return null;
 }
 
 /**
@@ -169,26 +138,10 @@ function CategoryChip({
   const iconColor = active ? accent : colors.onSurface;
 
   return (
-    <Animated.View
-      style={[
-        styles.chipShadow,
-        containerStyle,
-        active && {
-          // Colored halo on the selected chip. Applied on the OUTER wrapper
-          // only — putting shadow/elevation on the inner card too caused a
-          // double-elevation artifact on some Android GPUs (a solid white
-          // rectangle behind semi-transparent icon pixels).
-          shadowColor: accent,
-          shadowOpacity: 0.55,
-          shadowRadius: 14,
-          shadowOffset: { width: 0, height: 0 },
-          elevation: 12,
-        },
-      ]}
-    >
+    <Animated.View style={[styles.chipShadow, containerStyle]}>
       <Pressable onPress={handlePress} testID={testID} style={styles.chipPress}>
         <Animated.View style={[styles.chipCard, bgStyle]}>
-          <Animated.View style={[iconAnim, { backgroundColor: "transparent" }]}>
+          <Animated.View style={iconAnim}>
             <Ionicons name={icon} size={30} color={iconColor} />
           </Animated.View>
         </Animated.View>
@@ -206,160 +159,6 @@ function CategoryChip({
 function formatTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-}
-
-/**
- * Tall movie-poster style card used in every horizontal shelf.
- * ~168×240px with a bottom gradient overlay carrying title + price + meta.
- */
-function PosterCard({
-  event, onPress, badge, badgeColor, styles, colors,
-}: {
-  event: Event;
-  onPress: () => void;
-  badge?: string;
-  badgeColor?: string;
-  styles: any;
-  colors: Colors;
-}) {
-  const scale = useSharedValue(1);
-  const pulse = useSharedValue(0);
-  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-  const onPressIn = () => { scale.value = withSpring(0.96, { damping: 12 }); };
-  const onPressOut = () => { scale.value = withSpring(1, { damping: 10 }); };
-
-  const ribbon = computeRibbon(event);
-
-  useEffect(() => {
-    if (ribbon) {
-      pulse.value = withRepeat(
-        withSequence(
-          withTiming(1, { duration: 700 }),
-          withTiming(0, { duration: 700 })
-        ),
-        -1,
-        false
-      );
-    } else {
-      pulse.value = 0;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!ribbon]);
-
-  const pulseStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.7, 1], Extrapolation.CLAMP),
-    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.06], Extrapolation.CLAMP) }],
-  }));
-  const dotStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [1, 0.4], Extrapolation.CLAMP),
-    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.35], Extrapolation.CLAMP) }],
-  }));
-
-  return (
-    <Animated.View style={[styles.posterShadow, animStyle]}>
-      <Pressable
-        testID={`poster-${event.id}`}
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        style={styles.posterCard}
-      >
-        <Image
-          source={event.image_url || undefined}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
-          recyclingKey={event.id}
-        />
-        <LinearGradient
-          colors={["rgba(15,23,42,0.05)", "rgba(15,23,42,0.85)"]}
-          locations={[0.35, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-        {badge && (
-          <View style={[styles.posterBadge, { backgroundColor: badgeColor || colors.brandPrimary }]}>
-            <Text style={styles.posterBadgeText}>{badge}</Text>
-          </View>
-        )}
-        {ribbon && (
-          <Animated.View style={[styles.posterRibbon, { backgroundColor: ribbon.color }, pulseStyle]}>
-            <Animated.View style={[styles.ribbonDot, dotStyle]} />
-            <Text style={styles.ribbonText}>{ribbon.label}</Text>
-          </Animated.View>
-        )}
-        <View style={styles.posterPricePill}>
-          <Text style={styles.posterPriceText}>
-            {event.price > 0 ? `₹${event.price.toFixed(0)}` : "FREE"}
-          </Text>
-        </View>
-        <View style={styles.posterBottom}>
-          <Text style={styles.posterCategory}>{event.category.toUpperCase()}</Text>
-          <Text style={styles.posterTitle} numberOfLines={2}>{event.title}</Text>
-          <View style={styles.posterMetaRow}>
-            <Ionicons name="calendar-outline" size={11} color="rgba(255,255,255,0.85)" />
-            <Text style={styles.posterMetaText} numberOfLines={1}>{formatDate(event.date)}</Text>
-            {event.distance_km != null && (
-              <>
-                <View style={styles.posterMetaDot} />
-                <Text style={styles.posterMetaText}>{event.distance_km.toFixed(1)}km</Text>
-              </>
-            )}
-          </View>
-        </View>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-/**
- * A labeled horizontal shelf that carries a title, small subtitle, and a
- * horizontally scrollable row of PosterCards.
- */
-function Shelf({
-  title, subtitle, icon, iconColor, items, onPress, styles, colors, badge, badgeColor,
-}: {
-  title: string;
-  subtitle?: string;
-  icon?: any;
-  iconColor?: string;
-  items: Event[];
-  onPress: (e: Event) => void;
-  styles: any;
-  colors: Colors;
-  badge?: string;
-  badgeColor?: string;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <View style={styles.shelfWrap}>
-      <View style={styles.shelfHeader}>
-        <View style={styles.shelfTitleRow}>
-          {icon && <Ionicons name={icon} size={16} color={iconColor || colors.brand} />}
-          <Text style={styles.shelfTitle}>{title}</Text>
-        </View>
-        {subtitle && <Text style={styles.shelfSubtitle}>{subtitle}</Text>}
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.shelfRow}
-        decelerationRate="fast"
-      >
-        {items.map((e) => (
-          <PosterCard
-            key={e.id}
-            event={e}
-            onPress={() => onPress(e)}
-            badge={badge}
-            badgeColor={badgeColor}
-            styles={styles}
-            colors={colors}
-          />
-        ))}
-      </ScrollView>
-    </View>
-  );
 }
 
 export default function Discover() {
@@ -516,100 +315,43 @@ export default function Discover() {
     Haptics.selectionAsync();
   };
 
-  const { featuredEvents, tonightEvents, weekendEvents, freeEvents, otherEvents } = useMemo(() => {
-    const now = new Date();
-    const todayEnd = new Date(now);
-    todayEnd.setHours(23, 59, 59, 999);
-
-    // "This weekend" = upcoming Sat + Sun (relative to today)
-    const day = now.getDay(); // 0 Sun ... 6 Sat
-    const daysToSat = (6 - day + 7) % 7;
-    const satStart = new Date(now);
-    satStart.setDate(now.getDate() + daysToSat);
-    satStart.setHours(0, 0, 0, 0);
-    const sunEnd = new Date(satStart);
-    sunEnd.setDate(satStart.getDate() + 1);
-    sunEnd.setHours(23, 59, 59, 999);
-
-    const featured: Event[] = [];
-    const tonight: Event[] = [];
-    const weekend: Event[] = [];
-    const free: Event[] = [];
-    const other: Event[] = [];
-    const seen = new Set<string>();
-
-    // 1. Featured always goes to featured shelf.
-    for (const e of events) {
-      if (e.is_featured) {
-        featured.push(e);
-        seen.add(e.id);
-      }
-    }
-    // 2. Tonight (starts today, in the future).
-    for (const e of events) {
-      if (seen.has(e.id)) continue;
-      const d = new Date(e.date);
-      if (d >= now && d <= todayEnd) {
-        tonight.push(e);
-        seen.add(e.id);
-      }
-    }
-    // 3. This weekend.
-    for (const e of events) {
-      if (seen.has(e.id)) continue;
-      const d = new Date(e.date);
-      if (d >= satStart && d <= sunEnd) {
-        weekend.push(e);
-        seen.add(e.id);
-      }
-    }
-    // 4. Free & popular (unclaimed).
-    for (const e of events) {
-      if (seen.has(e.id)) continue;
-      if ((e.price || 0) === 0) {
-        free.push(e);
-        seen.add(e.id);
-      }
-    }
-    // 5. Everything else.
-    for (const e of events) {
-      if (seen.has(e.id)) continue;
-      other.push(e);
-    }
-    return {
-      featuredEvents: featured,
-      tonightEvents: tonight,
-      weekendEvents: weekend,
-      freeEvents: free,
-      otherEvents: other,
-    };
+  const { featuredEvents, regularEvents } = useMemo(() => {
+    const featured = events.filter((e) => e.is_featured);
+    const regular = events.filter((e) => !e.is_featured);
+    return { featuredEvents: featured, regularEvents: regular };
   }, [events]);
 
-  const activeCategory = useMemo(
-    () => CATEGORIES.find((c) => c.key === category) || CATEGORIES[0],
-    [category]
-  );
+  // Featured carousel auto-scroll state
+  const carouselRef = useRef<ScrollView>(null);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const userInteractingRef = useRef(false);
+  const CAROUSEL_ITEM_STEP = CAROUSEL_WIDTH + spacing.md;
 
-  // Header tint hex → rgba with alpha for the wash behind the header.
-  const headerTint = useMemo(() => {
-    const hex = activeCategory.color.replace("#", "");
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return `rgba(${r},${g},${b},0.22)`;
-  }, [activeCategory]);
+  useEffect(() => {
+    if (featuredEvents.length <= 1) return;
+    const timer = setInterval(() => {
+      if (userInteractingRef.current) return;
+      setCarouselIndex((prev) => {
+        const next = (prev + 1) % featuredEvents.length;
+        carouselRef.current?.scrollTo({ x: next * CAROUSEL_ITEM_STEP, animated: true });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [featuredEvents.length, CAROUSEL_ITEM_STEP]);
+
+  const onCarouselScroll = (e: any) => {
+    const x = e.nativeEvent.contentOffset.x;
+    const idx = Math.round(x / CAROUSEL_ITEM_STEP);
+    if (idx !== carouselIndex && idx >= 0 && idx < featuredEvents.length) {
+      setCarouselIndex(idx);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {/* Sticky header — background wash tinted by the selected category */}
+      {/* Sticky header */}
       <View style={styles.header}>
-        <LinearGradient
-          colors={[headerTint, "transparent"]}
-          style={StyleSheet.absoluteFill}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0.6, y: 1 }}
-          pointerEvents="none"
-        />
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.greeting}>Discover</Text>
@@ -682,65 +424,127 @@ export default function Discover() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
           showsVerticalScrollIndicator={false}
         >
-          <Shelf
-            title="Featured"
-            subtitle={featuredEvents.length > 0 ? `${featuredEvents.length} boosted` : undefined}
-            icon="flame"
-            iconColor="#F59E0B"
-            items={featuredEvents}
-            onPress={(e) => router.push(`/event/${e.id}` as any)}
-            styles={styles}
-            colors={colors}
-            badge="FEATURED"
-            badgeColor="#F59E0B"
-          />
+          {featuredEvents.length > 0 && (
+            <View style={styles.featuredSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons name="flame" size={16} color="#F59E0B" />
+                  <Text style={styles.sectionTitle}>Featured</Text>
+                </View>
+                <Text style={styles.sectionCount}>{featuredEvents.length} boosted</Text>
+              </View>
+              <ScrollView
+                ref={carouselRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={CAROUSEL_WIDTH + spacing.md}
+                decelerationRate="fast"
+                contentContainerStyle={styles.carousel}
+                onScroll={onCarouselScroll}
+                scrollEventThrottle={32}
+                onScrollBeginDrag={() => { userInteractingRef.current = true; }}
+                onScrollEndDrag={() => {
+                  // Resume auto-scroll after 5s of inactivity
+                  setTimeout(() => { userInteractingRef.current = false; }, 5000);
+                }}
+              >
+                {featuredEvents.map((e) => (
+                  <Pressable
+                    key={e.id}
+                    testID={`featured-card-${e.id}`}
+                    style={styles.featuredCard}
+                    onPress={() => router.push(`/event/${e.id}` as any)}
+                  >
+                    <Image source={e.image_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+                    <LinearGradient
+                      colors={["rgba(31,41,55,0.15)", "rgba(31,41,55,0.85)"]}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View style={styles.featuredTop}>
+                      <View style={styles.featuredBadgeBig}>
+                        <Ionicons name="flame" size={12} color={colors.onBrandPrimary} />
+                        <Text style={styles.featuredBadgeText}>Featured</Text>
+                      </View>
+                      <View style={styles.featuredPricePill}>
+                        <Text style={styles.featuredPriceText}>
+                          {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.featuredBottom}>
+                      <Text style={styles.featuredCategoryText}>{e.category}</Text>
+                      <Text style={styles.featuredTitle} numberOfLines={2}>{e.title}</Text>
+                      <View style={styles.featuredMetaRow}>
+                        <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.85)" />
+                        <Text style={styles.featuredMetaText}>{formatDate(e.date)}</Text>
+                        <View style={styles.featuredMetaDot} />
+                        <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
+                        <Text style={styles.featuredMetaText} numberOfLines={1}>
+                          {e.distance_km != null ? `${e.distance_km.toFixed(1)}km` : e.location_name}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {featuredEvents.length > 1 && (
+                <View style={styles.dotsRow} testID="carousel-dots">
+                  {featuredEvents.map((_, i) => (
+                    <View
+                      key={i}
+                      style={[styles.dot, i === carouselIndex && styles.dotActive]}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
 
-          <Shelf
-            title="Happening tonight"
-            subtitle={tonightEvents.length > 0 ? `${tonightEvents.length} tonight` : undefined}
-            icon="moon"
-            iconColor="#8B5CF6"
-            items={tonightEvents}
-            onPress={(e) => router.push(`/event/${e.id}` as any)}
-            styles={styles}
-            colors={colors}
-            badge="TONIGHT"
-            badgeColor="#8B5CF6"
-          />
+          {regularEvents.length > 0 && (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>All events</Text>
+              <Text style={styles.sectionCount}>{regularEvents.length} near you</Text>
+            </View>
+          )}
 
-          <Shelf
-            title="This weekend"
-            subtitle={weekendEvents.length > 0 ? `${weekendEvents.length} events` : undefined}
-            icon="sunny"
-            iconColor="#F97316"
-            items={weekendEvents}
-            onPress={(e) => router.push(`/event/${e.id}` as any)}
-            styles={styles}
-            colors={colors}
-          />
-
-          <Shelf
-            title="Free & popular"
-            subtitle={freeEvents.length > 0 ? "No ticket, just come" : undefined}
-            icon="pricetag"
-            iconColor="#10B981"
-            items={freeEvents}
-            onPress={(e) => router.push(`/event/${e.id}` as any)}
-            styles={styles}
-            colors={colors}
-          />
-
-          <Shelf
-            title="More near you"
-            subtitle={otherEvents.length > 0 ? `${otherEvents.length} events` : undefined}
-            icon="location"
-            iconColor={colors.brand}
-            items={otherEvents}
-            onPress={(e) => router.push(`/event/${e.id}` as any)}
-            styles={styles}
-            colors={colors}
-          />
-
+          {regularEvents.map((e) => (
+            <Pressable
+              key={e.id}
+              testID={`event-card-${e.id}`}
+              style={styles.card}
+              onPress={() => router.push(`/event/${e.id}` as any)}
+            >
+              <View style={styles.imgWrap}>
+                <Image source={e.image_url} style={styles.img} contentFit="cover" transition={200} />
+                <LinearGradient
+                  colors={["transparent", "rgba(31,41,55,0.75)"]}
+                  style={styles.imgOverlay}
+                />
+                <View style={styles.catBadge}>
+                  <Text style={styles.catBadgeText}>{e.category}</Text>
+                </View>
+                <View style={styles.priceBadge}>
+                  <Text style={styles.priceBadgeText}>
+                    {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle} numberOfLines={2}>{e.title}</Text>
+                <View style={styles.metaRow}>
+                  <Ionicons name="calendar-outline" size={14} color={colors.muted} />
+                  <Text style={styles.metaText}>{formatDate(e.date)} · {formatTime(e.date)}</Text>
+                </View>
+                <View style={styles.metaRow}>
+                  <Ionicons name="location-outline" size={14} color={colors.muted} />
+                  <Text style={styles.metaText} numberOfLines={1}>
+                    {e.location_name}
+                    {e.distance_km != null ? ` · ${e.distance_km.toFixed(1)}km` : ""}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          ))}
           <View style={{ height: spacing["2xl"] }} />
         </ScrollView>
       )}
@@ -802,11 +606,10 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingBottom: spacing.md,
     backgroundColor: colors.surface,
     borderBottomColor: colors.divider,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
+    borderBottomWidth: 1,
   },
   headerRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm },
-  greeting: { fontSize: 32, fontWeight: "800", color: colors.onSurface, marginBottom: 4, letterSpacing: -0.6 },
+  greeting: { fontSize: 28, fontWeight: "700", color: colors.onSurface, marginBottom: 4 },
   locPill: {
     flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
   },
@@ -859,82 +662,99 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
   list: { padding: spacing.lg, gap: spacing.lg },
-
-  // --- Netflix-style shelves ---
-  shelfWrap: { marginBottom: spacing.md },
-  shelfHeader: {
-    marginBottom: spacing.md,
-    paddingHorizontal: 2,
-  },
-  shelfTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  shelfTitle: { fontSize: 20, fontWeight: "800", color: colors.onSurface, letterSpacing: -0.3 },
-  shelfSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 },
-  shelfRow: { gap: spacing.md, paddingRight: spacing.lg },
-  posterShadow: {
-    borderRadius: radius.lg,
-    ...shadows.card,
-  },
-  posterCard: {
-    width: 168, height: 240,
+  card: {
+    backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,
     overflow: "hidden",
-    backgroundColor: colors.surfaceTertiary,
+    marginBottom: spacing.md,
+    ...shadows.card,
   },
-  posterBadge: {
-    position: "absolute", top: 10, left: 10,
-    paddingHorizontal: 8, paddingVertical: 4,
+  imgWrap: { height: 200, position: "relative" },
+  img: { width: "100%", height: "100%", backgroundColor: colors.surfaceTertiary },
+  imgOverlay: { position: "absolute", left: 0, right: 0, bottom: 0, height: 80 },
+  catBadge: {
+    position: "absolute", top: 12, left: 12,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: radius.pill,
   },
-  posterBadgeText: {
-    color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 0.5,
-  },
-  posterRibbon: {
-    position: "absolute", bottom: 96, left: 10,
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 8, paddingVertical: 5,
-    borderRadius: radius.pill,
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
-  ribbonDot: {
-    width: 6, height: 6, borderRadius: 3,
-    backgroundColor: "#FFFFFF",
-  },
-  ribbonText: {
-    color: "#FFFFFF", fontSize: 9, fontWeight: "800", letterSpacing: 0.6,
-  },
-  posterPricePill: {
-    position: "absolute", top: 10, right: 10,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 8, paddingVertical: 4,
+  catBadgeText: { fontSize: 11, color: "#111827", fontWeight: "600" },
+  priceBadge: {
+    position: "absolute", top: 12, right: 12,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: radius.pill,
   },
-  posterPriceText: {
-    color: "#FFFFFF", fontSize: 11, fontWeight: "700",
+  priceBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+
+  // Section headings
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginBottom: spacing.md, marginTop: spacing.sm,
   },
-  posterBottom: {
-    position: "absolute", left: 12, right: 12, bottom: 12, gap: 3,
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
+  sectionCount: { fontSize: 12, color: colors.muted, fontWeight: "500" },
+
+  // Featured carousel
+  featuredSection: { marginBottom: spacing.lg },
+  carousel: { gap: spacing.md, paddingRight: spacing.lg },
+  featuredCard: {
+    width: CAROUSEL_WIDTH, height: 220,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    ...shadows.floating,
+    flexShrink: 0,
+    justifyContent: "space-between",
   },
-  posterCategory: {
-    color: "rgba(255,255,255,0.75)", fontSize: 9, fontWeight: "700",
-    letterSpacing: 0.6,
+  featuredTop: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
+    padding: spacing.md,
   },
-  posterTitle: {
-    color: "#FFFFFF", fontSize: 15, fontWeight: "700", lineHeight: 18,
+  featuredBadgeBig: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#F59E0B",
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: radius.pill,
   },
-  posterMetaRow: {
+  featuredBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+  featuredPricePill: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: radius.pill,
+  },
+  featuredPriceText: { fontSize: 11, color: "#111827", fontWeight: "700" },
+  featuredBottom: { padding: spacing.md, gap: 4 },
+  featuredCategoryText: {
+    color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600",
+    textTransform: "uppercase", letterSpacing: 0.5,
+  },
+  featuredTitle: {
+    color: "#FFFFFF", fontSize: 20, fontWeight: "700", lineHeight: 24,
+  },
+  featuredMetaRow: {
     flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4,
   },
-  posterMetaText: {
-    color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "500",
+  featuredMetaText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "500" },
+  featuredMetaDot: {
+    width: 3, height: 3, borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.6)", marginHorizontal: 4,
   },
-  posterMetaDot: {
-    width: 2, height: 2, borderRadius: 1,
-    backgroundColor: "rgba(255,255,255,0.6)", marginHorizontal: 3,
+  dotsRow: {
+    flexDirection: "row", justifyContent: "center", alignItems: "center",
+    gap: 6, marginTop: spacing.md,
   },
+  dot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: colors.borderStrong,
+  },
+  dotActive: {
+    width: 20, backgroundColor: colors.brand,
+  },
+  cardBody: { padding: spacing.lg, gap: 6 },
+  cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  metaText: { fontSize: 13, color: colors.muted, flex: 1 },
 
   modalBg: {
     flex: 1, backgroundColor: "rgba(17,24,39,0.5)", justifyContent: "flex-end",

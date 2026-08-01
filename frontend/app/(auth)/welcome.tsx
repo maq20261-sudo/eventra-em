@@ -21,18 +21,18 @@ export default function Welcome() {
   return (
     <View style={styles.container} testID="welcome-screen">
       <Image
-        source="https://images.unsplash.com/photo-1459749411175-04bf5292ceea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwxfHxjb25jZXJ0fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=900"
+        source="https://images.pexels.com/photos/894557/pexels-photo-894557.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
         style={StyleSheet.absoluteFill}
         contentFit="cover"
       />
       <LinearGradient
-        colors={["rgba(15,15,20,0.35)", "rgba(15,15,20,0.75)", "rgba(15,15,20,0.98)"]}
+        colors={["rgba(31,41,55,0.15)", "rgba(31,41,55,0.55)", "rgba(31,41,55,0.95)"]}
         style={StyleSheet.absoluteFill}
       />
 
       <View style={styles.topRow}>
         <View style={styles.logoRow}>
-          <Ionicons name="sparkles" size={22} color={colors.brand} />
+          <Ionicons name="sparkles" size={20} color={colors.surface} />
           <Text style={styles.logoText}>GatherSpace</Text>
         </View>
       </View>
@@ -72,9 +72,9 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   logoText: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "800",
+    color: colors.surface,
+    fontSize: 18,
+    fontWeight: "600",
     letterSpacing: 0.3,
   },
   bottom: {
@@ -87,15 +87,14 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     gap: spacing.md,
   },
   title: {
-    color: "#FFFFFF",
-    fontSize: 38,
-    fontWeight: "800",
-    lineHeight: 44,
+    color: colors.surface,
+    fontSize: 34,
+    fontWeight: "700",
+    lineHeight: 40,
     marginBottom: spacing.xs,
-    letterSpacing: -0.5,
   },
   subtitle: {
-    color: "rgba(255,255,255,0.85)",
+    color: "#E5E7EB",
     fontSize: 16,
     lineHeight: 22,
     marginBottom: spacing.lg,
@@ -109,16 +108,11 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.sm,
-    shadowColor: colors.brandPrimary,
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
   },
   primaryText: {
-    color: "#FFFFFF",
+    color: colors.onBrandPrimary,
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "600",
   },
   secondaryBtn: {
     borderColor: "rgba(255,255,255,0.4)",
@@ -128,10 +122,9 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: spacing.xl,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
   },
   secondaryText: {
-    color: "#FFFFFF",
+    color: colors.surface,
     fontSize: 16,
     fontWeight: "500",
   },
