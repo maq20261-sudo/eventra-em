@@ -169,23 +169,26 @@ function CategoryChip({
   const iconColor = active ? accent : colors.onSurface;
 
   return (
-    <Animated.View style={[styles.chipShadow, containerStyle]}>
+    <Animated.View
+      style={[
+        styles.chipShadow,
+        containerStyle,
+        active && {
+          // Colored halo on the selected chip. Applied on the OUTER wrapper
+          // only — putting shadow/elevation on the inner card too caused a
+          // double-elevation artifact on some Android GPUs (a solid white
+          // rectangle behind semi-transparent icon pixels).
+          shadowColor: accent,
+          shadowOpacity: 0.55,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: 12,
+        },
+      ]}
+    >
       <Pressable onPress={handlePress} testID={testID} style={styles.chipPress}>
-        <Animated.View
-          style={[
-            styles.chipCard,
-            bgStyle,
-            active && {
-              // Colored halo on the selected chip. Native uses shadow*, web/Android also picks these up.
-              shadowColor: accent,
-              shadowOpacity: 0.55,
-              shadowRadius: 14,
-              shadowOffset: { width: 0, height: 0 },
-              elevation: 10,
-            },
-          ]}
-        >
-          <Animated.View style={iconAnim}>
+        <Animated.View style={[styles.chipCard, bgStyle]}>
+          <Animated.View style={[iconAnim, { backgroundColor: "transparent" }]}>
             <Ionicons name={icon} size={30} color={iconColor} />
           </Animated.View>
         </Animated.View>
@@ -582,15 +585,29 @@ export default function Discover() {
     };
   }, [events]);
 
+  const activeCategory = useMemo(
+    () => CATEGORIES.find((c) => c.key === category) || CATEGORIES[0],
+    [category]
+  );
+
+  // Header tint hex → rgba with alpha for the wash behind the header.
+  const headerTint = useMemo(() => {
+    const hex = activeCategory.color.replace("#", "");
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},0.22)`;
+  }, [activeCategory]);
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {/* Sticky header w/ subtle brand gradient behind */}
+      {/* Sticky header — background wash tinted by the selected category */}
       <View style={styles.header}>
         <LinearGradient
-          colors={[colors.brandTertiary, "transparent"]}
+          colors={[headerTint, "transparent"]}
           style={StyleSheet.absoluteFill}
           start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          end={{ x: 0.6, y: 1 }}
           pointerEvents="none"
         />
         <View style={styles.headerRow}>

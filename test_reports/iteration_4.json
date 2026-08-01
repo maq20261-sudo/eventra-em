@@ -1,0 +1,53 @@
+{
+  "summary": "Frontend-only visual verification of the Discover screen category-chip fixes. Logged in as demo consumer, cycled through all 7 categories (All/Music/Art/Tech/Food/Sports/Other) in BOTH dark (default) and light themes. Bug 1 (white-square inside active chip icon) is FIXED — every active chip renders a clean glyph with a colored border + accent halo, no white/solid rectangle artifact behind the icon on the web preview. Bug 2 (static header tint) is FIXED — the header LinearGradient wash now dynamically re-tints per category: All=red/pink, Music=purple, Art=orange, Tech=cyan, Food=red, Sports=teal, Other=slate. Regression checks pass: shelves (Featured / Free & popular / More near you) render with poster cards + ribbons + FREE badge, chip spring/wiggle animations play, tab bar & login flow unaffected, theme toggle in Profile flips dark<->light correctly. Note: Bug 1's Android-specific double-elevation artifact cannot be reproduced on Expo web preview (elevation is native-only) — the code-level fix (halo shadow/elevation moved to outer chipShadow wrapper only + transparent bg guard on icon animated wrapper) matches the RN #30039 workaround pattern and looks correct on inspection.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Discover (chip row / header tint)",
+        "issues": [
+          "CATEGORIES 'All' uses color '#EF4444' (red) — same hex as 'Food'. The review request specifies 'All pink #F84464' (brand pink). Result: when the user toggles between All and Food the header wash looks identical, and the 'All' halo doesn't match the brand pink. Recommend changing CATEGORIES[0].color from '#EF4444' to '#F84464' in /app/frontend/app/(consumer)/discover.tsx:40 to match the spec."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "shadow* style props",
+        "issue": "Console warns 'shadow* style props are deprecated. Use boxShadow.' twice on app boot. Likely originating from shadows.card in /app/frontend/src/theme.ts (used by chipCard, posterShadow, etc.). RN Web / react-native >=0.76 now prefers boxShadow. Not blocking, but worth migrating in a follow-up. Reference: /app/frontend/app/(consumer)/discover.tsx:839 (chipCard uses ...shadows.card), :874 (posterShadow uses ...shadows.card)."
+      },
+      {
+        "component": "pointerEvents prop",
+        "issue": "Console warns 'props.pointerEvents is deprecated. Use style.pointerEvents'. Comes from the header <LinearGradient pointerEvents=\"none\" /> at /app/frontend/app/(consumer)/discover.tsx:611. Move to style.pointerEvents to silence."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots/ (local copies)",
+    "/root/.emergent/.screenshots/dark_hdr_All.jpeg .. dark_hdr_Other.jpeg (dark-theme header tint per category)",
+    "/root/.emergent/.screenshots/dark_chip_*.jpeg (dark-theme chip zoom per category, no white-square artifact visible)",
+    "/root/.emergent/.screenshots/L_All.png, L2_Music.png, L2_Art.png, L2_Tech.png, L2_Food.png, L2_Sports.png, L2_Other.png (light-theme header tint + active chip zoom)"
+  ],
+  "action_items": [
+    "Optional: change CATEGORIES 'All' color from '#EF4444' to brand pink '#F84464' in /app/frontend/app/(consumer)/discover.tsx line 40 so the header wash + halo for 'All' matches the spec and is visually distinct from 'Food'.",
+    "Optional cleanup: migrate shadow* → boxShadow in /app/frontend/src/theme.ts (shadows.card) and change LinearGradient's pointerEvents prop to style.pointerEvents in discover.tsx:611 to clear deprecation warnings.",
+    "Recommend at least one physical Android smoke-test (or Expo Go build) to confirm the double-elevation white-square fix, since RN elevation only renders on native — Expo web preview cannot reproduce the original artifact."
+  ],
+  "critical_code_review_comments": [
+    "Fix implementation matches the described RN #30039 workaround: active accent halo (shadowColor/shadowOpacity/shadowRadius/elevation=12) is only applied to the OUTER chipShadow wrapper (discover.tsx:176-186), and the inner chipCard keeps only the neutral `...shadows.card`. Icon's animated wrapper gets an explicit `backgroundColor: 'transparent'` (discover.tsx:191) as belt-and-suspenders. Looks correct.",
+    "headerTint computation (discover.tsx:594-600) properly derives rgba(r,g,b,0.22) from activeCategory.color and is memoised on `activeCategory`. LinearGradient at :606-612 consumes it and re-renders on category change — verified visually in dark and light themes.",
+    "activeCategory (discover.tsx:588-591) falls back to CATEGORIES[0] if the current key is unknown — safe.",
+    "chipShadow style (:824-828) intentionally has no static shadow — only the active state adds the halo. Good, prevents idle-state double-elevation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only)", "frontend": "100% (both bugs verified fixed on web preview across dark + light themes for all 7 categories; all regression checks pass)"},
+  "seed_data_creation": "None — used seeded demo@consumer.com account only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "If retesting: log in via 'I'm here to discover events' → 'Use demo consumer account' → 'Sign In'. Chip testIDs are chip-All / chip-Music / chip-Art / chip-Tech / chip-Food / chip-Sports / chip-Other. Header wash is inside the sticky header View (top ~330px of the screen). Theme toggle lives in Profile tab → 'Dark theme' switch (role=switch). Default theme is dark. Expo web preview cannot reproduce the Android-native white-square artifact — visual check on web confirms no regression but a native Android smoke-test is the only definitive verification for Bug 1.",
+  "rca_of_issue": "Bug 1 RCA (accepted from main agent, verified against code): Previously both the outer wrapper (which already carried shadows.card) AND the inner chipCard applied active-state shadow* + elevation. On some Android GPUs, RN renders the second elevation layer as a solid rectangle behind the icon (RN issue #30039) — appearing as a white square because chipCard's background color for the active state is the accent + '1A' (~10% alpha) tint, which lets the underlying elevation rectangle bleed through as a light box. Fix: keep only chipShadow (outer wrapper) as the elevation source in the active state; leave chipCard with the neutral shadows.card only, plus explicit transparent bg on the icon's animated wrapper. Verified on web preview — no artifact and no visual regression across all 7 categories in dark + light. Bug 2 RCA: header LinearGradient was hard-coded to colors.brandTertiary. Fix: derive activeCategory from CATEGORIES and compute rgba(...,0.22) from its hex accent, then pass into the top-of-gradient stop. Verified visually — tint changes as expected on each category selection in both themes."
+}
