@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/src/AuthContext";
+import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
@@ -26,6 +27,7 @@ export default function Register() {
   const [role, setRole] = useState<"consumer" | "organizer">(initialRole);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,16 +36,33 @@ export default function Register() {
 
   const submit = async () => {
     setError(null);
+    const cleanMobile = mobile.replace(/\D/g, "");
     if (!name.trim() || !email.trim() || password.length < 6) {
       setError("Fill in all fields. Password must be at least 6 characters.");
       return;
     }
+    if (cleanMobile.length !== 10 || !"6789".includes(cleanMobile[0])) {
+      setError("Enter a valid 10-digit Indian mobile (starting with 6/7/8/9).");
+      return;
+    }
     setLoading(true);
     try {
-      const user = await signUp(email.trim().toLowerCase(), password, name.trim(), role);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (user.role === "organizer") router.replace("/(organizer)/events");
-      else router.replace("/(consumer)/discover");
+      const res = await api.registerStart({
+        email: email.trim().toLowerCase(),
+        password,
+        name: name.trim(),
+        role,
+        mobile: cleanMobile,
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push({
+        pathname: "/(auth)/otp" as any,
+        params: {
+          kind: "register",
+          challenge_id: res.challenge_id,
+          mobile_masked: res.mobile_masked,
+        },
+      });
     } catch (e: any) {
       setError(e?.message || "Registration failed");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -103,6 +122,20 @@ export default function Register() {
               keyboardType="email-address"
               value={email}
               onChangeText={setEmail}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Mobile (India)</Text>
+            <TextInput
+              testID="mobile-input"
+              style={styles.input}
+              placeholder="10-digit number (starts 6/7/8/9)"
+              placeholderTextColor={colors.muted}
+              keyboardType="phone-pad"
+              maxLength={10}
+              value={mobile}
+              onChangeText={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))}
             />
           </View>
 

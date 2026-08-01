@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/src/AuthContext";
+import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
@@ -31,6 +32,9 @@ export default function Login() {
   const router = useRouter();
   const { signIn } = useAuth();
 
+  const isDemoAccount = (em: string) =>
+    em === "demo@consumer.com" || em === "demo@organizer.com";
+
   const submit = async () => {
     setError(null);
     if (!email.trim() || !password) {
@@ -39,10 +43,26 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const user = await signIn(email.trim().toLowerCase(), password);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (user.role === "organizer") router.replace("/(organizer)/events");
-      else router.replace("/(consumer)/discover");
+      const em = email.trim().toLowerCase();
+      // Demo accounts skip OTP for a smooth demo experience.
+      if (isDemoAccount(em)) {
+        const user = await signIn(em, password);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (user.role === "organizer") router.replace("/(organizer)/events");
+        else router.replace("/(consumer)/discover");
+        return;
+      }
+      // Real users: password verify → OTP → JWT.
+      const res = await api.loginStart({ email: em, password });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push({
+        pathname: "/(auth)/otp" as any,
+        params: {
+          kind: "login",
+          challenge_id: res.challenge_id,
+          mobile_masked: res.mobile_masked,
+        },
+      });
     } catch (e: any) {
       setError(e?.message || "Login failed");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

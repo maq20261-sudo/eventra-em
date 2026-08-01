@@ -6,6 +6,7 @@ type AuthState = {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<User>;
   signUp: (email: string, password: string, name: string, role: "consumer" | "organizer") => Promise<User>;
+  signInWithToken: (token: string, user: User) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -52,13 +53,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res.user as User;
   };
 
+  const signInWithToken = async (token: string, u: User) => {
+    await setToken(token);
+    setUser(u);
+  };
+
   const signOut = async () => {
     await setToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, refresh }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signInWithToken, signOut, refresh }}>
       {children}
     </AuthContext.Provider>
   );

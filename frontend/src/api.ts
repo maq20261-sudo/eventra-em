@@ -45,12 +45,24 @@ async function request(
 }
 
 export const api = {
-  // Auth
+  // Auth (legacy — kept for demo/back-compat)
   register: (body: { email: string; password: string; name: string; role: "consumer" | "organizer" }) =>
     request("/auth/register", { method: "POST", body: JSON.stringify(body) }),
   login: (body: { email: string; password: string }) =>
     request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => request("/auth/me", { method: "GET" }, true),
+
+  // OTP-gated auth (MSG91)
+  registerStart: (body: { email: string; password: string; name: string; role: "consumer" | "organizer"; mobile: string }) =>
+    request("/auth/register/start", { method: "POST", body: JSON.stringify(body) }),
+  registerVerify: (body: { challenge_id: string; otp: string }) =>
+    request("/auth/register/verify", { method: "POST", body: JSON.stringify(body) }),
+  loginStart: (body: { email: string; password: string }) =>
+    request("/auth/login/start", { method: "POST", body: JSON.stringify(body) }),
+  loginVerify: (body: { challenge_id: string; otp: string }) =>
+    request("/auth/login/verify", { method: "POST", body: JSON.stringify(body) }),
+  otpResend: (body: { challenge_id: string }) =>
+    request("/auth/otp/resend", { method: "POST", body: JSON.stringify(body) }),
 
   // Events
   listEvents: (params: {
