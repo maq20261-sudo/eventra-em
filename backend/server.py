@@ -59,6 +59,11 @@ api_router = APIRouter(prefix="/api")
 _RATE_LIMITS: Dict[str, Dict[str, Any]] = {
     "/api/auth/login": {"max": 8, "window_s": 60},
     "/api/auth/register": {"max": 5, "window_s": 60},
+    "/api/auth/register/start": {"max": 5, "window_s": 60},
+    "/api/auth/register/verify": {"max": 10, "window_s": 60},
+    "/api/auth/login/start": {"max": 8, "window_s": 60},
+    "/api/auth/login/verify": {"max": 10, "window_s": 60},
+    "/api/auth/otp/resend": {"max": 3, "window_s": 60},
     "/api/payments/create_order": {"max": 15, "window_s": 60},
     "/api/payments/verify": {"max": 30, "window_s": 60},
 }
@@ -99,16 +104,37 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6)
     name: str
     role: Literal["consumer", "organizer"]
+    mobile: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+class OtpStartRegister(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str
+    role: Literal["consumer", "organizer"]
+    mobile: str
+
+class OtpStartLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class OtpVerify(BaseModel):
+    challenge_id: str
+    otp: str = Field(min_length=4, max_length=8)
+
+class OtpResend(BaseModel):
+    challenge_id: str
 
 class UserOut(BaseModel):
     id: str
     email: str
     name: str
     role: str
+    mobile: Optional[str] = None
+    mobile_verified: bool = False
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -310,8 +336,16 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
 
 # ---------- Auth Routes ----------
 
+def _user_out(user: dict) -> UserOut:
+    return UserOut(
+        id=user["id"], email=user["email"], name=user["name"], role=user["role"],
+        mobile=user.get("mobile"), mobile_verified=bool(user.get("mobile_verified")),
+    )
+
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(body: UserCreate):
+    """Legacy register — kept for demo accounts and backward compatibility.
+    New signups should use /auth/register/start + /auth/register/verify."""
     existing = await db.users.find_one({"email": body.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -322,29 +356,143 @@ async def register(body: UserCreate):
         "name": body.name,
         "role": body.role,
         "password_hash": hash_password(body.password),
+        "mobile": body.mobile,
+        "mobile_verified": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(doc)
     token = create_access_token({"sub": user_id, "role": body.role})
-    return TokenResponse(
-        access_token=token,
-        user=UserOut(id=user_id, email=body.email, name=body.name, role=body.role),
-    )
+    return TokenResponse(access_token=token, user=_user_out(doc))
 
 @api_router.post("/auth/login", response_model=TokenResponse)
 async def login(body: UserLogin):
+    """Legacy login (no OTP). Kept for demo accounts and back-compat."""
     user = await db.users.find_one({"email": body.email})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token({"sub": user["id"], "role": user["role"]})
-    return TokenResponse(
-        access_token=token,
-        user=UserOut(id=user["id"], email=user["email"], name=user["name"], role=user["role"]),
-    )
+    return TokenResponse(access_token=token, user=_user_out(user))
+
+# ---------- OTP-gated Auth (MSG91) ----------
+
+import msg91_client as msg91
+
+async def _send_challenge(kind: str, email: str, mobile91: str, extra: Optional[dict] = None) -> str:
+    """Create a fresh OTP challenge doc + send SMS. Returns challenge_id."""
+    otp = msg91.generate_otp()
+    challenge_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": challenge_id,
+        "kind": kind,  # 'register' or 'login'
+        "email": email,
+        "mobile": mobile91,
+        "otp_hash": hash_password(otp),  # never store plaintext OTP
+        "attempts": 0,
+        "expires_at": (now + timedelta(minutes=msg91.OTP_TTL)).isoformat(),
+        "created_at": now.isoformat(),
+        "extra": extra or {},
+    }
+    await db.otp_challenges.insert_one(doc)
+    try:
+        await msg91.send_otp(mobile91, otp)
+    except msg91.MSG91Error as e:
+        # rollback so a broken send doesn't leave a dangling challenge
+        await db.otp_challenges.delete_one({"id": challenge_id})
+        raise HTTPException(status_code=502, detail=f"Couldn't send OTP: {e}")
+    return challenge_id
+
+async def _consume_challenge(challenge_id: str, otp: str, kind: str) -> dict:
+    ch = await db.otp_challenges.find_one({"id": challenge_id, "kind": kind})
+    if not ch:
+        raise HTTPException(status_code=404, detail="Challenge not found or expired")
+    if datetime.fromisoformat(ch["expires_at"]) < datetime.now(timezone.utc):
+        await db.otp_challenges.delete_one({"id": challenge_id})
+        raise HTTPException(status_code=410, detail="OTP expired. Please request a new one.")
+    if ch["attempts"] >= 5:
+        await db.otp_challenges.delete_one({"id": challenge_id})
+        raise HTTPException(status_code=429, detail="Too many attempts. Please request a new OTP.")
+    if not verify_password(otp, ch["otp_hash"]):
+        await db.otp_challenges.update_one({"id": challenge_id}, {"$inc": {"attempts": 1}})
+        raise HTTPException(status_code=400, detail="Incorrect OTP")
+    # success — burn the challenge
+    await db.otp_challenges.delete_one({"id": challenge_id})
+    return ch
+
+@api_router.post("/auth/register/start")
+async def register_start(body: OtpStartRegister):
+    try:
+        mobile91 = msg91.normalize_in_mobile(body.mobile)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if await db.users.find_one({"email": body.email}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if await db.users.find_one({"mobile": mobile91, "mobile_verified": True}):
+        raise HTTPException(status_code=400, detail="Mobile already in use")
+    extra = {
+        "password_hash": hash_password(body.password),
+        "name": body.name,
+        "role": body.role,
+    }
+    cid = await _send_challenge("register", body.email, mobile91, extra=extra)
+    return {"challenge_id": cid, "mobile_masked": msg91.mask_mobile(mobile91), "expires_in_seconds": msg91.OTP_TTL * 60}
+
+@api_router.post("/auth/register/verify", response_model=TokenResponse)
+async def register_verify(body: OtpVerify):
+    ch = await _consume_challenge(body.challenge_id, body.otp, "register")
+    if await db.users.find_one({"email": ch["email"]}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user_id = str(uuid.uuid4())
+    doc = {
+        "id": user_id,
+        "email": ch["email"],
+        "name": ch["extra"]["name"],
+        "role": ch["extra"]["role"],
+        "password_hash": ch["extra"]["password_hash"],
+        "mobile": ch["mobile"],
+        "mobile_verified": True,
+        "mobile_verified_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    token = create_access_token({"sub": user_id, "role": doc["role"]})
+    return TokenResponse(access_token=token, user=_user_out(doc))
+
+@api_router.post("/auth/login/start")
+async def login_start(body: OtpStartLogin):
+    user = await db.users.find_one({"email": body.email})
+    if not user or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.get("mobile") or not user.get("mobile_verified"):
+        raise HTTPException(status_code=409, detail="Mobile not linked. Please complete mobile verification from Profile before logging in with OTP.")
+    cid = await _send_challenge("login", body.email, user["mobile"], extra={"user_id": user["id"]})
+    return {"challenge_id": cid, "mobile_masked": msg91.mask_mobile(user["mobile"]), "expires_in_seconds": msg91.OTP_TTL * 60}
+
+@api_router.post("/auth/login/verify", response_model=TokenResponse)
+async def login_verify(body: OtpVerify):
+    ch = await _consume_challenge(body.challenge_id, body.otp, "login")
+    user = await db.users.find_one({"id": ch["extra"]["user_id"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    return TokenResponse(access_token=token, user=_user_out(user))
+
+@api_router.post("/auth/otp/resend")
+async def otp_resend(body: OtpResend):
+    old = await db.otp_challenges.find_one({"id": body.challenge_id})
+    if not old:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    # Enforce a small min-interval on resends (5s) to prevent spam
+    created = datetime.fromisoformat(old["created_at"])
+    if (datetime.now(timezone.utc) - created).total_seconds() < 5:
+        raise HTTPException(status_code=429, detail="Please wait a few seconds before requesting a new OTP")
+    await db.otp_challenges.delete_one({"id": body.challenge_id})
+    cid = await _send_challenge(old["kind"], old["email"], old["mobile"], extra=old.get("extra"))
+    return {"challenge_id": cid, "mobile_masked": msg91.mask_mobile(old["mobile"]), "expires_in_seconds": msg91.OTP_TTL * 60}
 
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(user=Depends(get_current_user)):
-    return UserOut(id=user["id"], email=user["email"], name=user["name"], role=user["role"])
+    return _user_out(user)
 
 # ---------- Event Routes ----------
 
@@ -1094,6 +1242,9 @@ async def _startup_indexes_and_backfill():
         await db.users.create_index("email", unique=True)
         await db.payment_intents.create_index("id", unique=True)
         await db.payment_intents.create_index("razorpay_order_id")
+        await db.otp_challenges.create_index("id", unique=True)
+        # TTL: challenges auto-expire from Mongo 10 min after creation (safety net)
+        await db.otp_challenges.create_index("created_at")
         logger.info("Indexes ensured.")
     except Exception as e:  # pragma: no cover - best-effort
         logger.warning("Index creation warning: %s", e)
