@@ -85,6 +85,10 @@ async def send_otp(mobile91: str, otp: str) -> None:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(f"{BASE_URL}/otp", params=params, headers={"accept": "application/json"})
         data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        # Always log MSG91's response so we can debug delivery failures (200 OK
+        # from MSG91 doesn't imply SMS was actually sent — the body carries the
+        # real result e.g. {"type":"error","message":"template not approved"}).
+        print(f"[MSG91] send_otp mobile={mask_mobile(mobile91)} http={r.status_code} body={data or r.text!r}")
         if r.status_code >= 400 or data.get("type") == "error":
             msg = data.get("message") or r.text
             raise MSG91Error(f"MSG91 send failed: {msg}")
