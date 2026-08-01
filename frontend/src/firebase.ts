@@ -1,27 +1,26 @@
 /**
- * Firebase Phone Auth wrapper.
+ * Firebase Phone Auth wrapper — MODULAR API for RN Firebase v25+.
  *
- * `@react-native-firebase/auth` is a native module — it only works after a
- * dev-client/production build. In Expo Go / web previews the native code
- * doesn't exist, so we lazy-load it and expose a clear `isSupported` flag
- * to callers.
+ * On web/Expo Go the native module isn't linked; we lazy-load and expose
+ * `isPhoneAuthSupported()` so callers can degrade gracefully.
  */
 import { Platform } from "react-native";
 
-// A confirmation object returned by Firebase after signInWithPhoneNumber.
-// Kept opaque from callers — they treat it as a token they must pass back
-// to `verifyOtp` unchanged.
 export type PhoneConfirmation = {
   __confirmation: any; // FirebaseAuthTypes.ConfirmationResult
   mobileMasked: string;
 };
 
+// Try to import the module once; keep the whole namespace so we can pull
+// the modular functions (getAuth / signInWithPhoneNumber / getIdToken /
+// signOut) at call-time.
+let _fbAuth: any = null;
 const RN_FIREBASE_AUTH_AVAILABLE = (() => {
   if (Platform.OS === "web") return false;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("@react-native-firebase/auth");
-    return true;
+    _fbAuth = require("@react-native-firebase/auth");
+    return !!_fbAuth;
   } catch {
     return false;
   }
@@ -45,19 +44,35 @@ export function maskE164(e164: string): string {
   return `${e164.slice(0, 3)} ${e164.slice(3, 5)}XX XX${tail}`;
 }
 
-/** Send OTP via Firebase Phone Auth. Throws with a clear message on native
- *  when Play Integrity / config isn't set up correctly. */
+/** Resolve the current auth instance using whichever API surface this
+ *  version of RN Firebase exposes. v25+ uses the modular `getAuth()`,
+ *  older versions used a callable default export `auth()`. Support both. */
+function resolveAuth(): any {
+  if (!_fbAuth) throw new Error("Firebase Auth module not loaded");
+  if (typeof _fbAuth.getAuth === "function") return _fbAuth.getAuth();
+  if (typeof _fbAuth.default === "function") return _fbAuth.default();
+  throw new Error("Firebase Auth API not recognized in this environment");
+}
+
+/** Send OTP via Firebase Phone Auth. */
 export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
   if (!RN_FIREBASE_AUTH_AVAILABLE) {
     throw new Error(
       "Phone sign-in isn't available on this platform. Please open GatherSpace on your phone to continue."
     );
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const authModule = require("@react-native-firebase/auth").default;
   const e164 = toE164India(mobile);
   try {
-    const confirmation = await authModule().signInWithPhoneNumber(e164);
+    const authInstance = resolveAuth();
+    let confirmation: any;
+    // Prefer modular API (v25+); fall back to namespaced instance method.
+    if (typeof _fbAuth.signInWithPhoneNumber === "function") {
+      confirmation = await _fbAuth.signInWithPhoneNumber(authInstance, e164);
+    } else if (typeof authInstance.signInWithPhoneNumber === "function") {
+      confirmation = await authInstance.signInWithPhoneNumber(e164);
+    } else {
+      throw new Error("signInWithPhoneNumber is not available in this Firebase Auth build.");
+    }
     return { __confirmation: confirmation, mobileMasked: maskE164(e164) };
   } catch (e: any) {
     const code = e?.code || "";
@@ -67,8 +82,9 @@ export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
       throw new Error("Too many attempts. Please wait a while before trying again.");
     if (code.includes("missing-client-identifier") || code.includes("app-not-authorized"))
       throw new Error(
-        "This app isn't yet authorised for Firebase Phone Auth. Add the build's SHA-1 fingerprint in Firebase Console → your Android app → Add fingerprint."
+        "This app isn't yet authorised for Firebase Phone Auth. Please add the build's SHA-1 fingerprint in Firebase Console → your Android app → Add fingerprint, then retry."
       );
+    if (code.includes("network")) throw new Error("Network error. Please check your connection and retry.");
     throw new Error(e?.message || "Couldn't send OTP");
   }
 }
@@ -80,11 +96,17 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
   }
   try {
     const credential = await conf.__confirmation.confirm(otp);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const authModule = require("@react-native-firebase/auth").default;
-    const currentUser = credential?.user || authModule().currentUser;
+    const authInstance = resolveAuth();
+    const currentUser = credential?.user || authInstance.currentUser;
     if (!currentUser) throw new Error("No signed-in Firebase user after verify");
-    const idToken = await currentUser.getIdToken(true);
+    // Modular getIdToken(user, forceRefresh) OR instance-method getIdToken(forceRefresh)
+    let idToken: string | null = null;
+    if (typeof _fbAuth.getIdToken === "function") {
+      idToken = await _fbAuth.getIdToken(currentUser, true);
+    } else if (typeof currentUser.getIdToken === "function") {
+      idToken = await currentUser.getIdToken(true);
+    }
+    if (!idToken) throw new Error("Couldn't fetch verification token.");
     return idToken;
   } catch (e: any) {
     const code = e?.code || "";
@@ -96,13 +118,16 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
   }
 }
 
-/** Sign out from Firebase (clears the currentUser on-device). */
+/** Sign out from Firebase (clears currentUser on-device). */
 export async function firebaseSignOut(): Promise<void> {
   if (!RN_FIREBASE_AUTH_AVAILABLE) return;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const authModule = require("@react-native-firebase/auth").default;
-    await authModule().signOut();
+    const authInstance = resolveAuth();
+    if (typeof _fbAuth.signOut === "function") {
+      await _fbAuth.signOut(authInstance);
+    } else if (typeof authInstance.signOut === "function") {
+      await authInstance.signOut();
+    }
   } catch {
     /* ignore */
   }
