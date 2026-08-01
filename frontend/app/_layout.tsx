@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/AuthContext";
 import { ThemeProvider, useTheme } from "@/src/ThemeContext";
+import { checkAndApplyUpdate } from "@/src/updates";
 
 LogBox.ignoreAllLogs(true);
 
@@ -31,6 +32,12 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [loaded, error]);
+
+  // Fire-and-forget OTA update check on cold start. If a newer JS bundle
+  // is available, expo-updates downloads it and reloads the app silently.
+  useEffect(() => {
+    checkAndApplyUpdate();
+  }, []);
 
   if (!loaded && !error) return null;
 
