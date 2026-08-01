@@ -37,13 +37,13 @@ import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 
 const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
-  { key: "All", label: "All", icon: "sparkles-outline", color: "#F84464" },
-  { key: "Music", label: "Music", icon: "musical-notes-outline", color: "#8B5CF6" },
-  { key: "Art", label: "Art", icon: "color-palette-outline", color: "#F97316" },
-  { key: "Tech", label: "Tech", icon: "hardware-chip-outline", color: "#0EA5E9" },
-  { key: "Food", label: "Food", icon: "restaurant-outline", color: "#EF4444" },
-  { key: "Sports", label: "Sports", icon: "basketball-outline", color: "#14B8A6" },
-  { key: "Other", label: "Other", icon: "grid-outline", color: "#64748B" },
+  { key: "All", label: "All", icon: "sparkles", color: "#F84464" },
+  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6" },
+  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316" },
+  { key: "Tech", label: "Tech", icon: "laptop", color: "#0EA5E9" },
+  { key: "Food", label: "Food", icon: "fast-food", color: "#EF4444" },
+  { key: "Sports", label: "Sports", icon: "trophy", color: "#14B8A6" },
+  { key: "Other", label: "Other", icon: "apps", color: "#64748B" },
 ];
 
 const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
