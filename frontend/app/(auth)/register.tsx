@@ -19,6 +19,8 @@ import { useTheme, type Colors } from "@/src/ThemeContext";
 import { isPhoneAuthSupported, sendOtp, toE164India } from "@/src/firebase";
 import { setPhoneSession } from "@/src/phoneSession";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function Register() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -28,6 +30,8 @@ export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -36,14 +40,17 @@ export default function Register() {
   const submit = async () => {
     setError(null);
     const cleanMobile = mobile.replace(/\D/g, "");
-    if (!name.trim()) {
-      setError("Please enter your name.");
-      return;
-    }
-    if (cleanMobile.length !== 10 || !"6789".includes(cleanMobile[0])) {
-      setError("Enter a valid 10-digit Indian mobile (starting 6/7/8/9).");
-      return;
-    }
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedName = name.trim();
+
+    if (!trimmedName) return setError("Please enter your name.");
+    if (cleanMobile.length !== 10 || !"6789".includes(cleanMobile[0]))
+      return setError("Enter a valid 10-digit Indian mobile (starting 6/7/8/9).");
+    if (!EMAIL_RE.test(trimmedEmail))
+      return setError("Please enter a valid email address.");
+    if (password.length < 8)
+      return setError("Password must be at least 8 characters.");
+
     if (!phoneSupported) {
       setError(
         "Phone sign-up isn't available on this platform. Please open GatherSpace on your phone to continue."
@@ -57,8 +64,9 @@ export default function Register() {
         confirmation: conf,
         kind: "register",
         role,
-        name: name.trim(),
-        email: email.trim().toLowerCase() || undefined,
+        name: trimmedName,
+        email: trimmedEmail,
+        password,
         mobile: toE164India(cleanMobile),
       });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -83,7 +91,7 @@ export default function Register() {
           </Pressable>
 
           <Text style={styles.title}>Create account</Text>
-          <Text style={styles.subtitle}>Join GatherSpace in seconds</Text>
+          <Text style={styles.subtitle}>Verify your mobile, set an email + password to sign in later.</Text>
 
           {!phoneSupported && Platform.OS === "web" && (
             <View style={styles.infoBanner}>
@@ -143,18 +151,47 @@ export default function Register() {
           </View>
 
           <View style={styles.field}>
-            <Text style={styles.label}>Email (optional)</Text>
+            <Text style={styles.label}>Email</Text>
             <TextInput
               testID="email-input"
               style={styles.input}
               placeholder="you@example.com"
               placeholderTextColor={colors.muted}
               autoCapitalize="none"
+              autoCorrect={false}
               keyboardType="email-address"
               value={email}
               onChangeText={setEmail}
             />
-            <Text style={styles.helperText}>Only used to send booking receipts. You can skip this.</Text>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordRow}>
+              <TextInput
+                testID="password-input"
+                style={[styles.input, styles.passwordInput]}
+                placeholder="At least 8 characters"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+              />
+              <Pressable
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeBtn}
+                testID="toggle-password-btn"
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            </View>
+            <Text style={styles.helperText}>You&apos;ll use this email + password to sign in later.</Text>
           </View>
 
           {error && (
@@ -200,7 +237,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginBottom: spacing.lg, ...shadows.card,
   },
   title: { fontSize: 32, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.xs },
-  subtitle: { fontSize: 16, color: colors.muted, marginBottom: spacing.xl },
+  subtitle: { fontSize: 15, color: colors.muted, marginBottom: spacing.xl, lineHeight: 22 },
   infoBanner: {
     flexDirection: "row", alignItems: "flex-start", gap: 8,
     backgroundColor: colors.brandTertiary,
@@ -241,6 +278,12 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   dialCodeText: { fontSize: 16, fontWeight: "600", color: colors.onSurface },
   mobileInput: { flex: 1 },
+  passwordRow: { position: "relative" },
+  passwordInput: { paddingRight: 44 },
+  eyeBtn: {
+    position: "absolute", right: 4, top: 0, bottom: 0,
+    width: 44, alignItems: "center", justifyContent: "center",
+  },
   error: {
     color: colors.error, fontSize: 14, marginBottom: spacing.md,
     backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,

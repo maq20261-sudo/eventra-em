@@ -65,6 +65,10 @@ export default function OtpScreen() {
       setError("Session expired. Please restart the flow.");
       return;
     }
+    if (!session.email || !session.password || !session.name || !session.role) {
+      setError("Signup details missing. Please go back and try again.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -72,8 +76,9 @@ export default function OtpScreen() {
       const res = await api.firebaseVerify({
         id_token: idToken,
         name: session.name,
-        role: session.role,
         email: session.email,
+        password: session.password,
+        role: session.role,
       });
       await signInWithToken(res.access_token, res.user);
       clearPhoneSession();

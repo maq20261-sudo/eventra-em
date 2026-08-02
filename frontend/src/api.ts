@@ -68,9 +68,10 @@ export const api = {
   // & mints our own JWT after checking the Firebase ID token.
   firebaseVerify: (body: {
     id_token: string;
-    name?: string;
-    role?: "consumer" | "organizer";
-    email?: string;
+    name: string;
+    email: string;
+    password: string;
+    role: "consumer" | "organizer";
   }) => request("/auth/firebase-verify", { method: "POST", body: JSON.stringify(body) }),
 
   // Events

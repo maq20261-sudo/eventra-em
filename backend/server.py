@@ -140,12 +140,15 @@ class OtpResend(BaseModel):
     challenge_id: str
 
 class FirebaseVerifyBody(BaseModel):
+    """Payload for `/auth/firebase-verify` — the signup-only endpoint.
+    All fields except id_token are required: we insist that phone-verified
+    users also set an email + password so they can sign in with either
+    factor going forward."""
     id_token: str
-    # Optional profile fields — used only for first-time signups so users can
-    # continue browsing as an Attendee/Organizer immediately after OTP.
-    name: Optional[str] = None
-    role: Optional[Literal["consumer", "organizer"]] = None
-    email: Optional[EmailStr] = None
+    name: str = Field(min_length=1, max_length=80)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    role: Literal["consumer", "organizer"] = "consumer"
 
 class UserOut(BaseModel):
     id: str
@@ -512,12 +515,18 @@ async def otp_resend(body: OtpResend):
     return {"challenge_id": cid, "mobile_masked": msg91.mask_mobile(old["mobile"]), "expires_in_seconds": msg91.OTP_TTL * 60}
 
 
-# ---------- Firebase Phone Auth (bypasses DLT for real production SMS) ----------
+# ---------- Firebase Phone Auth (SIGNUP ONLY — login uses /auth/login) -----
 @api_router.post("/auth/firebase-verify", response_model=TokenResponse)
 async def firebase_verify(body: FirebaseVerifyBody):
-    """Client-side flow: Expo app calls Firebase to send + verify SMS OTP, then
-    hands the resulting ID token here. We verify signature/claims via the
-    Admin SDK, then upsert the user in Mongo and mint our own JWT."""
+    """Signup endpoint. The app runs a Firebase Phone Auth challenge on the
+    client and hands us the resulting ID token. After verifying the token
+    (proves phone ownership) we create a fresh account with the caller's
+    email + password, so they can later sign in with either factor.
+
+    We reject if the phone, email, or firebase_uid is already tied to any
+    existing user — the caller should sign in via `/auth/login` instead of
+    trying to re-register.
+    """
     if not fb.is_enabled():
         raise HTTPException(status_code=503, detail="Firebase Admin not configured on server")
     try:
@@ -530,71 +539,43 @@ async def firebase_verify(body: FirebaseVerifyBody):
     if not phone_number or not firebase_uid:
         raise HTTPException(status_code=400, detail="Firebase token missing phone number claim")
 
-    # Store phone in the same 91XXXXXXXXXX format used by the rest of the app
     mobile_stored = phone_number.lstrip("+")
+    email = body.email.strip().lower()
+    name = body.name.strip()
 
-    # Look up user by firebase_uid first (most reliable, both are server-side
-    # facts), then by verified mobile number from the token. We DELIBERATELY
-    # do NOT match by the caller-supplied `body.email` — that value is not
-    # verified server-side, and doing so would allow a stranger with any
-    # Firebase phone token to hijack any account by typing its email
-    # (SEC-001).
-    user = await db.users.find_one({"firebase_uid": firebase_uid})
-    if not user:
-        user = await db.users.find_one({"mobile": mobile_stored})
+    # Refuse duplicates — this is a signup, not a linking endpoint. Doing so
+    # protects existing accounts from being taken over by a fresh phone
+    # token that happens to reuse someone else's email (SEC-001 hardening).
+    existing = await db.users.find_one({
+        "$or": [
+            {"firebase_uid": firebase_uid},
+            {"mobile": mobile_stored},
+            {"email": email},
+        ]
+    })
+    if existing:
+        # We deliberately don't leak WHICH field collided — otherwise this
+        # doubles as an account-enumeration oracle.
+        raise HTTPException(
+            status_code=409,
+            detail="An account already exists with this phone or email. Please sign in instead.",
+        )
 
     now_iso = datetime.now(timezone.utc).isoformat()
-
-    if user:
-        # Update existing account: link firebase_uid and mark mobile verified.
-        updates: dict = {
-            "firebase_uid": firebase_uid,
-            "mobile": mobile_stored,
-            "mobile_verified": True,
-            "mobile_verified_at": now_iso,
-            "last_login_at": now_iso,
-        }
-        await db.users.update_one({"id": user["id"]}, {"$set": updates})
-        user.update(updates)
-    else:
-        # First-time signup via phone. Only the verified phone number is
-        # trusted — derive a random name/email if the client didn't supply
-        # one. If they DID supply an email, we save it on the profile only
-        # as a receipt/contact hint (not usable for login) so we don't help
-        # an attacker link an existing password account by email (SEC-001).
-        role = body.role or "consumer"
-        name = (body.name or f"User {mobile_stored[-4:]}").strip() or "New User"
-        # Never reuse an existing account's email; always assign a synthetic
-        # unique internal identifier for this phone-first user.
-        internal_email = f"phone_{firebase_uid[:12]}@users.gatherspace.local".lower()
-        if await db.users.find_one({"email": internal_email}):
-            internal_email = f"phone_{uuid.uuid4().hex[:10]}@users.gatherspace.local"
-        contact_email = None
-        if body.email:
-            candidate = body.email.strip().lower()
-            # Only accept the email if it isn't already tied to another user.
-            # Storing it as `contact_email` (not `email`) makes clear it isn't
-            # a login credential.
-            if not await db.users.find_one({"email": candidate}):
-                contact_email = candidate
-
-        user = {
-            "id": str(uuid.uuid4()),
-            "email": internal_email,
-            "contact_email": contact_email,
-            "name": name,
-            "role": role,
-            # No password for phone-first users. Legacy password endpoints
-            # will simply refuse to sign them in via email/password.
-            "password_hash": hash_password(uuid.uuid4().hex),
-            "mobile": mobile_stored,
-            "mobile_verified": True,
-            "mobile_verified_at": now_iso,
-            "firebase_uid": firebase_uid,
-            "created_at": now_iso,
-            "auth_provider": "firebase_phone",
-        }
-        await db.users.insert_one(user)
+    user = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "name": name,
+        "role": body.role,
+        "password_hash": hash_password(body.password),
+        "mobile": mobile_stored,
+        "mobile_verified": True,
+        "mobile_verified_at": now_iso,
+        "firebase_uid": firebase_uid,
+        "created_at": now_iso,
+        "auth_provider": "firebase_phone",
+    }
+    await db.users.insert_one(user)
 
     token = create_access_token({"sub": user["id"], "role": user["role"]})
     return TokenResponse(access_token=token, user=_user_out(user))

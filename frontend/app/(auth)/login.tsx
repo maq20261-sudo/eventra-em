@@ -17,63 +17,21 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "@/src/AuthContext";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
-import { isPhoneAuthSupported, sendOtp, toE164India } from "@/src/firebase";
-import { setPhoneSession } from "@/src/phoneSession";
-
-type Mode = "phone" | "email";
 
 export default function Login() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const params = useLocalSearchParams<{ role?: string }>();
   const initialRole = (params.role === "organizer" ? "organizer" : "consumer") as "consumer" | "organizer";
-  const [role, setRole] = useState<"consumer" | "organizer">(initialRole);
-  const [mode, setMode] = useState<Mode>("phone");
-  const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const { signIn } = useAuth();
-  const phoneSupported = isPhoneAuthSupported();
 
-  const submitPhone = async () => {
-    setError(null);
-    const cleanMobile = mobile.replace(/\D/g, "");
-    if (cleanMobile.length !== 10 || !"6789".includes(cleanMobile[0])) {
-      setError("Enter a valid 10-digit Indian mobile (starting 6/7/8/9).");
-      return;
-    }
-    if (!phoneSupported) {
-      setError(
-        "Phone sign-in isn't available on this platform. Please try Email, or open GatherSpace on your phone."
-      );
-      return;
-    }
-    setLoading(true);
-    try {
-      const conf = await sendOtp(cleanMobile);
-      setPhoneSession({
-        confirmation: conf,
-        kind: "login",
-        mobile: toE164India(cleanMobile),
-        role,
-      });
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push({
-        pathname: "/(auth)/otp" as any,
-        params: { mobile_masked: conf.mobileMasked },
-      });
-    } catch (e: any) {
-      setError(e?.message || "Couldn't send OTP");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const submitEmail = async () => {
+  const submit = async () => {
     setError(null);
     if (!email.trim() || !password) {
       setError("Please enter your email and password.");
@@ -103,118 +61,69 @@ export default function Login() {
           </Pressable>
 
           <Text style={styles.title}>Welcome back</Text>
-          <Text style={styles.subtitle}>Sign in to continue</Text>
+          <Text style={styles.subtitle}>Sign in with your email &amp; password.</Text>
 
-          {/* Role selector */}
-          <View style={styles.segment}>
-            <Pressable
-              testID="role-consumer-tab"
-              style={[styles.segmentItem, role === "consumer" && styles.segmentItemActive]}
-              onPress={() => setRole("consumer")}
-            >
-              <Text style={[styles.segmentText, role === "consumer" && styles.segmentTextActive]}>Attendee</Text>
-            </Pressable>
-            <Pressable
-              testID="role-organizer-tab"
-              style={[styles.segmentItem, role === "organizer" && styles.segmentItemActive]}
-              onPress={() => setRole("organizer")}
-            >
-              <Text style={[styles.segmentText, role === "organizer" && styles.segmentTextActive]}>Organizer</Text>
-            </Pressable>
+          <View style={styles.field}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              testID="email-input"
+              style={styles.input}
+              placeholder="you@example.com"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+            />
           </View>
 
-          {/* Mode toggle */}
-          <View style={[styles.segment, styles.modeSegment]}>
-            <Pressable
-              testID="mode-phone-tab"
-              style={[styles.segmentItem, mode === "phone" && styles.segmentItemActive]}
-              onPress={() => { setMode("phone"); setError(null); }}
-            >
-              <Ionicons name="phone-portrait" size={14} color={mode === "phone" ? colors.onSurface : colors.muted} />
-              <Text style={[styles.segmentText, mode === "phone" && styles.segmentTextActive, { marginLeft: 6 }]}>
-                Phone
-              </Text>
-            </Pressable>
-            <Pressable
-              testID="mode-email-tab"
-              style={[styles.segmentItem, mode === "email" && styles.segmentItemActive]}
-              onPress={() => { setMode("email"); setError(null); }}
-            >
-              <Ionicons name="mail-outline" size={14} color={mode === "email" ? colors.onSurface : colors.muted} />
-              <Text style={[styles.segmentText, mode === "email" && styles.segmentTextActive, { marginLeft: 6 }]}>
-                Email
-              </Text>
-            </Pressable>
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.passwordRow}>
+              <TextInput
+                testID="password-input"
+                style={[styles.input, styles.passwordInput]}
+                placeholder="Your password"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+              />
+              <Pressable
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeBtn}
+                testID="toggle-password-btn"
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            </View>
           </View>
 
-          {mode === "phone" ? (
-            <>
-              {!phoneSupported && Platform.OS === "web" && (
-                <View style={styles.infoBanner}>
-                  <Ionicons name="information-circle" size={18} color={colors.brand} />
-                  <Text style={styles.infoBannerText}>
-                    Phone OTP only works in the installed app. To try the app here in preview, use the Email tab.
-                  </Text>
-                </View>
-              )}
-              <View style={styles.field}>
-                <Text style={styles.label}>Mobile (India)</Text>
-                <View style={styles.mobileRow}>
-                  <View style={styles.dialCode}><Text style={styles.dialCodeText}>+91</Text></View>
-                  <TextInput
-                    testID="mobile-input"
-                    style={[styles.input, styles.mobileInput]}
-                    placeholder="10-digit number"
-                    placeholderTextColor={colors.muted}
-                    keyboardType="phone-pad"
-                    maxLength={10}
-                    value={mobile}
-                    onChangeText={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))}
-                  />
-                </View>
-              </View>
-              {error && <Text style={styles.error} testID="login-error">{error}</Text>}
-              <Pressable style={[styles.primaryBtn, loading && { opacity: 0.6 }]} onPress={submitPhone} disabled={loading} testID="login-submit-btn">
-                {loading ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Send OTP</Text>}
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <View style={styles.field}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  testID="email-input"
-                  style={styles.input}
-                  placeholder="you@example.com"
-                  placeholderTextColor={colors.muted}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={email}
-                  onChangeText={setEmail}
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.label}>Password</Text>
-                <TextInput
-                  testID="password-input"
-                  style={styles.input}
-                  placeholder="••••••••"
-                  placeholderTextColor={colors.muted}
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
-              </View>
-              {error && <Text style={styles.error} testID="login-error">{error}</Text>}
-              <Pressable style={[styles.primaryBtn, loading && { opacity: 0.6 }]} onPress={submitEmail} disabled={loading} testID="login-email-submit-btn">
-                {loading ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryText}>Sign In</Text>}
-              </Pressable>
-            </>
-          )}
+          {error && <Text style={styles.error} testID="login-error">{error}</Text>}
+
+          <Pressable
+            style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
+            onPress={submit}
+            disabled={loading}
+            testID="login-submit-btn"
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.onBrandPrimary} />
+            ) : (
+              <Text style={styles.primaryText}>Sign In</Text>
+            )}
+          </Pressable>
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don&apos;t have an account?</Text>
-            <Link href={`/(auth)/register?role=${role}` as any} asChild>
+            <Link href={`/(auth)/register?role=${initialRole}` as any} asChild>
               <Pressable testID="go-register-btn">
                 <Text style={styles.footerLink}>Create one</Text>
               </Pressable>
@@ -237,28 +146,6 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   title: { fontSize: 32, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.xs },
   subtitle: { fontSize: 16, color: colors.muted, marginBottom: spacing.xl },
-  infoBanner: {
-    flexDirection: "row", alignItems: "flex-start", gap: 8,
-    backgroundColor: colors.brandTertiary,
-    padding: spacing.md, borderRadius: radius.md,
-    marginBottom: spacing.lg,
-  },
-  infoBannerText: { flex: 1, color: colors.onSurface, fontSize: 13, lineHeight: 18 },
-  segment: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceTertiary,
-    padding: 4,
-    borderRadius: radius.pill,
-    marginBottom: spacing.xl,
-  },
-  modeSegment: { marginTop: -spacing.md },
-  segmentItem: {
-    flex: 1, paddingVertical: 10, borderRadius: radius.pill,
-    alignItems: "center", flexDirection: "row", justifyContent: "center",
-  },
-  segmentItemActive: { backgroundColor: colors.surfaceSecondary, ...shadows.card },
-  segmentText: { fontSize: 14, color: colors.muted, fontWeight: "500" },
-  segmentTextActive: { color: colors.onSurface, fontWeight: "600" },
   field: { marginBottom: spacing.lg },
   label: { fontSize: 13, color: colors.onSurfaceTertiary, marginBottom: spacing.xs, fontWeight: "500" },
   input: {
@@ -271,15 +158,12 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderColor: colors.border,
     borderWidth: 1,
   },
-  mobileRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dialCode: {
-    paddingHorizontal: 14, paddingVertical: 14,
-    backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.md,
-    borderColor: colors.border, borderWidth: 1,
+  passwordRow: { position: "relative" },
+  passwordInput: { paddingRight: 44 },
+  eyeBtn: {
+    position: "absolute", right: 4, top: 0, bottom: 0,
+    width: 44, alignItems: "center", justifyContent: "center",
   },
-  dialCodeText: { fontSize: 16, fontWeight: "600", color: colors.onSurface },
-  mobileInput: { flex: 1 },
   error: {
     color: colors.error, fontSize: 14, marginBottom: spacing.md,
     backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,

@@ -79,7 +79,9 @@ export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
     if (code.includes("invalid-phone-number"))
       throw new Error("Invalid phone number. Use a 10-digit Indian mobile (starts 6/7/8/9).");
     if (code.includes("too-many-requests"))
-      throw new Error("Too many attempts. Please wait a while before trying again.");
+      throw new Error(
+        "Firebase limits how often codes can be sent to the same number. Please wait a few minutes before requesting another OTP."
+      );
     if (code.includes("missing-client-identifier") || code.includes("app-not-authorized"))
       throw new Error(
         "This app isn't yet authorised for Firebase Phone Auth. Please add the build's SHA-1 fingerprint in Firebase Console → your Android app → Add fingerprint, then retry."

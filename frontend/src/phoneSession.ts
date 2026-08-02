@@ -11,6 +11,7 @@ type PhoneSession = {
   role?: "consumer" | "organizer";
   name?: string;
   email?: string;
+  password?: string;
   mobile: string; // E.164 or raw digits — used only for display
 };
 
