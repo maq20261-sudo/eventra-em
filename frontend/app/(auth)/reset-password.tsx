@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -17,7 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
-import { spacing, radius } from "@/src/theme";
+import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { sendOtp, verifyOtp } from "@/src/firebase";
 import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
@@ -38,6 +39,9 @@ export default function ResetPassword() {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(30);
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
+  const [pendingIdToken, setPendingIdToken] = useState<string | null>(null);
   const [mobileMasked, setMobileMasked] = useState<string>(
     (params.mobile_masked as string) || session?.confirmation.mobileMasked || ""
   );
@@ -59,6 +63,37 @@ export default function ResetPassword() {
     }
   }, [session, router]);
 
+  const finalizeReset = async (idToken: string, role?: "consumer" | "organizer") => {
+    const res = await api.passwordResetVerify({
+      id_token: idToken,
+      new_password: password,
+      role,
+    });
+    if (res && (res as any).multiple_roles) {
+      const roles = (res as any).roles as string[];
+      setAvailableRoles(roles);
+      setPendingIdToken(idToken);
+      setRolePickerOpen(true);
+      return;
+    }
+    await signInWithToken(res.access_token, res.user);
+    clearPhoneSession();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert(
+      "Password updated",
+      "You've been signed in with your new password.",
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
+            else router.replace("/(consumer)/discover" as any);
+          },
+        },
+      ]
+    );
+  };
+
   const submit = async () => {
     setError(null);
     if (otp.length < 6) return setError("Enter the 6-digit OTP");
@@ -69,31 +104,27 @@ export default function ResetPassword() {
     setLoading(true);
     try {
       const idToken = await verifyOtp(session.confirmation, otp);
-      const res = await api.passwordResetVerify({
-        id_token: idToken,
-        new_password: password,
-      });
-      await signInWithToken(res.access_token, res.user);
-      clearPhoneSession();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        "Password updated",
-        "You've been signed in with your new password.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
-              else router.replace("/(consumer)/discover" as any);
-            },
-          },
-        ]
-      );
+      await finalizeReset(idToken);
     } catch (e: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(e?.message || "Couldn't reset password.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const pickRole = async (r: "consumer" | "organizer") => {
+    if (!pendingIdToken) return;
+    setRolePickerOpen(false);
+    setLoading(true);
+    try {
+      await finalizeReset(pendingIdToken, r);
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(e?.message || "Couldn't reset password.");
+    } finally {
+      setLoading(false);
+      setPendingIdToken(null);
     }
   };
 
@@ -220,6 +251,58 @@ export default function ResetPassword() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Role picker — shown when this mobile is registered as both roles. */}
+      <Modal
+        visible={rolePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRolePickerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="reset-role-picker-modal">
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="people-circle-outline" size={40} color={colors.brand} />
+            </View>
+            <Text style={styles.modalTitle}>Which account?</Text>
+            <Text style={styles.modalBody}>
+              This mobile is registered as both attendee and organizer. Pick which one to reset.
+            </Text>
+            {availableRoles.includes("consumer") && (
+              <Pressable
+                testID="reset-pick-consumer"
+                style={styles.modalBtn}
+                onPress={() => pickRole("consumer")}
+              >
+                <Ionicons name="ticket-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Reset Attendee password</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            {availableRoles.includes("organizer") && (
+              <Pressable
+                testID="reset-pick-organizer"
+                style={styles.modalBtn}
+                onPress={() => pickRole("organizer")}
+              >
+                <Ionicons name="calendar-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Reset Organizer password</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => setRolePickerOpen(false)}
+              style={styles.modalCancel}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -279,4 +362,42 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   resendRow: { flexDirection: "row", gap: 6, marginTop: spacing.lg },
   resendLabel: { fontSize: 14, color: colors.muted },
   resendLink: { fontSize: 14, color: colors.brand, fontWeight: "600" },
+
+  // Role picker modal (shared style pattern)
+  modalBackdrop: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center", alignItems: "center", paddingHorizontal: spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+    ...shadows.card,
+  },
+  modalIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  modalBody: {
+    marginTop: spacing.sm,
+    fontSize: 14, color: colors.muted,
+    textAlign: "center", lineHeight: 20, marginBottom: spacing.lg,
+  },
+  modalBtn: {
+    width: "100%",
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  modalBtnTitle: { color: colors.onSurface, fontSize: 15, fontWeight: "600" },
+  modalCancel: { marginTop: spacing.md, paddingVertical: 8 },
+  modalCancelText: { color: colors.muted, fontSize: 14, fontWeight: "500" },
 });

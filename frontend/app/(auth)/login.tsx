@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { useRouter, useLocalSearchParams, Link } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,10 +29,12 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
   const router = useRouter();
   const { signIn } = useAuth();
 
-  const submit = async () => {
+  const doSignIn = async (chosenRole?: "consumer" | "organizer") => {
     setError(null);
     if (!email.trim() || !password) {
       setError("Please enter your email and password.");
@@ -40,7 +43,15 @@ export default function Login() {
     setLoading(true);
     try {
       const em = email.trim().toLowerCase();
-      const user = await signIn(em, password);
+      const result = await signIn(em, password, chosenRole);
+      if ((result as any).multiple_roles) {
+        // Two accounts share this email — ask the user to pick one.
+        const roles = (result as any).roles as string[];
+        setAvailableRoles(roles);
+        setRolePickerOpen(true);
+        return;
+      }
+      const user = result as any;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (user.role === "organizer") router.replace("/(organizer)/events");
       else router.replace("/(consumer)/discover");
@@ -50,6 +61,13 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const submit = () => doSignIn();
+
+  const pickRole = async (r: "consumer" | "organizer") => {
+    setRolePickerOpen(false);
+    await doSignIn(r);
   };
 
   return (
@@ -137,6 +155,62 @@ export default function Login() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Role picker modal — shown when the entered email is registered
+          as both attendee and organizer. */}
+      <Modal
+        visible={rolePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRolePickerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="role-picker-modal">
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="people-circle-outline" size={40} color={colors.brand} />
+            </View>
+            <Text style={styles.modalTitle}>Which account?</Text>
+            <Text style={styles.modalBody}>
+              This email is registered as both attendee and organizer. Pick which one to sign in as.
+            </Text>
+            {availableRoles.includes("consumer") && (
+              <Pressable
+                testID="pick-consumer-btn"
+                style={styles.modalBtn}
+                onPress={() => pickRole("consumer")}
+              >
+                <Ionicons name="ticket-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Continue as Attendee</Text>
+                  <Text style={styles.modalBtnSub}>Discover &amp; book events</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            {availableRoles.includes("organizer") && (
+              <Pressable
+                testID="pick-organizer-btn"
+                style={styles.modalBtn}
+                onPress={() => pickRole("organizer")}
+              >
+                <Ionicons name="calendar-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Continue as Organizer</Text>
+                  <Text style={styles.modalBtnSub}>Manage &amp; host events</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => setRolePickerOpen(false)}
+              style={styles.modalCancel}
+              testID="role-picker-cancel"
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -198,4 +272,43 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   footerText: { color: colors.muted, fontSize: 14 },
   footerLink: { color: colors.brand, fontSize: 14, fontWeight: "600" },
+
+  // Role picker modal
+  modalBackdrop: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center", alignItems: "center", paddingHorizontal: spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+    ...shadows.card,
+  },
+  modalIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  modalBody: {
+    marginTop: spacing.sm,
+    fontSize: 14, color: colors.muted,
+    textAlign: "center", lineHeight: 20, marginBottom: spacing.lg,
+  },
+  modalBtn: {
+    width: "100%",
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  modalBtnTitle: { color: colors.onSurface, fontSize: 15, fontWeight: "600" },
+  modalBtnSub: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  modalCancel: { marginTop: spacing.md, paddingVertical: 8 },
+  modalCancelText: { color: colors.muted, fontSize: 14, fontWeight: "500" },
 });

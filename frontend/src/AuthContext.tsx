@@ -5,7 +5,7 @@ import { firebaseSignOut } from "./firebase";
 type AuthState = {
   user: User | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<User>;
+  signIn: (email: string, password: string, role?: "consumer" | "organizer") => Promise<User | { multiple_roles: true; roles: string[] }>;
   signUp: (email: string, password: string, name: string, role: "consumer" | "organizer") => Promise<User>;
   signInWithToken: (token: string, user: User) => Promise<void>;
   signOut: () => Promise<void>;
@@ -40,8 +40,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, [refresh]);
 
-  const signIn = async (email: string, password: string) => {
-    const res = await api.login({ email, password });
+  const signIn = async (email: string, password: string, role?: "consumer" | "organizer") => {
+    const res = await api.login({ email, password, role });
+    // Multi-role response — caller must prompt user for role and retry.
+    if (res && (res as any).multiple_roles) {
+      return { multiple_roles: true as const, roles: (res as any).roles as string[] };
+    }
     await setToken(res.access_token);
     setUser(res.user);
     return res.user as User;

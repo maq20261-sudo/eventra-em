@@ -121,6 +121,9 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    # Optional role — used when the same (email, password) matches multiple
+    # accounts (e.g. same email registered as both attendee + organizer).
+    role: Optional[Literal["consumer", "organizer"]] = None
 
 class OtpStartRegister(BaseModel):
     email: EmailStr
@@ -157,6 +160,9 @@ class PasswordResetVerifyBody(BaseModel):
     proving ownership of the phone → we set a new password on that user."""
     id_token: str
     new_password: str = Field(min_length=8, max_length=128)
+    # Required when the mobile has both an attendee and organizer account.
+    # If omitted and only one account exists, we reset that one.
+    role: Optional[Literal["consumer", "organizer"]] = None
 
 class UserOut(BaseModel):
     id: str
@@ -376,11 +382,11 @@ def _user_out(user: dict) -> UserOut:
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(body: UserCreate):
-    """Legacy register — kept for demo accounts and backward compatibility.
-    New signups should use /auth/register/start + /auth/register/verify."""
-    existing = await db.users.find_one({"email": body.email})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    """Register a new account. The same email can be registered as both
+    "consumer" and "organizer" (two independent accounts) so long as the
+    role differs — we only reject a duplicate (email, role) pair."""
+    if await db.users.find_one({"email": body.email, "role": body.role}):
+        raise HTTPException(status_code=400, detail="Email already registered as this role. Please sign in instead.")
     user_id = str(uuid.uuid4())
     doc = {
         "id": user_id,
@@ -396,14 +402,37 @@ async def register(body: UserCreate):
     token = create_access_token({"sub": user_id, "role": body.role})
     return TokenResponse(access_token=token, user=_user_out(doc))
 
-@api_router.post("/auth/login", response_model=TokenResponse)
+@api_router.post("/auth/login")
 async def login(body: UserLogin):
-    """Legacy login (no OTP). Kept for demo accounts and back-compat."""
-    user = await db.users.find_one({"email": body.email})
-    if not user or not verify_password(body.password, user["password_hash"]):
+    """Sign in with email + password. If the same email exists as multiple
+    roles and the caller didn't specify one, we return a 200 payload asking
+    the client to prompt the user for role selection."""
+    # Collect all accounts under this email whose password matches. This
+    # lets a user share the same password (or different ones) across roles.
+    all_users = await db.users.find({"email": body.email}).to_list(None)
+    matched = [u for u in all_users if verify_password(body.password, u["password_hash"])]
+    if not matched:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Role explicitly requested? Filter down to that role.
+    if body.role:
+        matched = [u for u in matched if u["role"] == body.role]
+        if not matched:
+            raise HTTPException(status_code=401, detail="Invalid email or password for this role")
+
+    if len(matched) > 1:
+        # Two accounts (attendee + organizer) both matched. Ask the client
+        # to disambiguate — we return HTTP 200 with a flag so the app can
+        # surface a role picker without treating this as an auth failure.
+        return {
+            "multiple_roles": True,
+            "roles": sorted({u["role"] for u in matched}),
+            "message": "This email is registered as multiple roles. Please choose which account to sign in as.",
+        }
+
+    user = matched[0]
     token = create_access_token({"sub": user["id"], "role": user["role"]})
-    return TokenResponse(access_token=token, user=_user_out(user))
+    return TokenResponse(access_token=token, user=_user_out(user)).model_dump()
 
 # ---------- OTP-gated Auth (MSG91) ----------
 
@@ -551,14 +580,18 @@ async def firebase_verify(body: FirebaseVerifyBody):
     email = body.email.strip().lower()
     name = body.name.strip()
 
-    # Refuse duplicates — this is a signup, not a linking endpoint. Doing so
-    # protects existing accounts from being taken over by a fresh phone
-    # token that happens to reuse someone else's email (SEC-001 hardening).
+    # Refuse duplicates FOR THIS ROLE only. The same phone/email may be
+    # registered as both attendee and organizer — those are two separate
+    # accounts. But re-registering the same (email OR mobile, role) triple
+    # would create a genuine duplicate.
     existing = await db.users.find_one({
-        "$or": [
-            {"firebase_uid": firebase_uid},
-            {"mobile": mobile_stored},
-            {"email": email},
+        "$and": [
+            {"role": body.role},
+            {"$or": [
+                {"firebase_uid": firebase_uid},
+                {"mobile": mobile_stored},
+                {"email": email},
+            ]},
         ]
     })
     if existing:
@@ -566,7 +599,7 @@ async def firebase_verify(body: FirebaseVerifyBody):
         # doubles as an account-enumeration oracle.
         raise HTTPException(
             status_code=409,
-            detail="An account already exists with this phone or email. Please sign in instead.",
+            detail="An account with this role is already registered on this phone/email. Please sign in instead.",
         )
 
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -590,7 +623,7 @@ async def firebase_verify(body: FirebaseVerifyBody):
 
 
 # ---------- Password Reset (Firebase Phone OTP-gated) ----------
-@api_router.post("/auth/password-reset/verify", response_model=TokenResponse)
+@api_router.post("/auth/password-reset/verify")
 async def password_reset_verify(body: PasswordResetVerifyBody):
     """The client (a) collects the user's mobile, (b) runs Firebase Phone
     Auth to get an id_token proving ownership, (c) collects a new password,
@@ -611,16 +644,29 @@ async def password_reset_verify(body: PasswordResetVerifyBody):
         raise HTTPException(status_code=400, detail="Missing phone number in verification token.")
     mobile_stored = phone_number.lstrip("+")
 
-    user = await db.users.find_one({"mobile": mobile_stored})
-    if not user and firebase_uid:
-        # Firebase UID may be linked without a matching mobile (edge case).
-        user = await db.users.find_one({"firebase_uid": firebase_uid})
-    if not user:
-        # Generic response — never confirm or deny account existence.
+    # Find ALL users on this mobile (up to two: attendee + organizer).
+    users = await db.users.find({"mobile": mobile_stored}).to_list(None)
+    if not users and firebase_uid:
+        users = await db.users.find({"firebase_uid": firebase_uid}).to_list(None)
+
+    if not users:
         raise HTTPException(
             status_code=404,
             detail="No account is registered with this mobile number. Please sign up first.",
         )
+
+    # Multi-role disambiguation.
+    if len(users) > 1 and not body.role:
+        return {
+            "multiple_roles": True,
+            "roles": sorted({u["role"] for u in users}),
+            "message": "This mobile is registered as multiple roles. Please choose which account to reset.",
+        }
+    if body.role:
+        users = [u for u in users if u["role"] == body.role]
+        if not users:
+            raise HTTPException(status_code=404, detail="No account for this role. Please sign up first.")
+    user = users[0]
 
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.users.update_one(
@@ -636,7 +682,7 @@ async def password_reset_verify(body: PasswordResetVerifyBody):
     user["password_hash"] = hash_password(body.new_password)  # not returned; just local
 
     token = create_access_token({"sub": user["id"], "role": user["role"]})
-    return TokenResponse(access_token=token, user=_user_out(user))
+    return TokenResponse(access_token=token, user=_user_out(user)).model_dump()
 
 
 @api_router.get("/auth/me", response_model=UserOut)
@@ -1583,7 +1629,14 @@ async def _startup_indexes_and_backfill():
         await db.events.create_index("id", unique=True)
         await db.bookings.create_index("id", unique=True)
         await db.bookings.create_index([("event_id", 1), ("user_id", 1)])
-        await db.users.create_index("email", unique=True)
+        # Same email can now exist as both consumer AND organizer accounts,
+        # so uniqueness is enforced on the (email, role) pair rather than
+        # email alone. Drop the legacy single-field unique index if present.
+        try:
+            await db.users.drop_index("email_1")
+        except Exception:
+            pass
+        await db.users.create_index([("email", 1), ("role", 1)], unique=True, name="email_role_unique")
         await db.payment_intents.create_index("id", unique=True)
         await db.payment_intents.create_index("razorpay_order_id")
         await db.otp_challenges.create_index("id", unique=True)
