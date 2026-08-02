@@ -7,7 +7,7 @@ import type { PhoneConfirmation } from "./firebase";
 
 type PhoneSession = {
   confirmation: PhoneConfirmation;
-  kind: "login" | "register";
+  kind: "login" | "register" | "reset";
   role?: "consumer" | "organizer";
   name?: string;
   email?: string;

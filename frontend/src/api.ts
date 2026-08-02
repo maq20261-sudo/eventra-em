@@ -74,6 +74,12 @@ export const api = {
     role: "consumer" | "organizer";
   }) => request("/auth/firebase-verify", { method: "POST", body: JSON.stringify(body) }),
 
+  // Password reset — client presents a fresh Firebase Phone OTP token +
+  // the new password. Backend verifies the token, updates password_hash,
+  // and returns a JWT so the user lands signed-in.
+  passwordResetVerify: (body: { id_token: string; new_password: string }) =>
+    request("/auth/password-reset/verify", { method: "POST", body: JSON.stringify(body) }),
+
   // Events
   listEvents: (params: {
     lat?: number;

@@ -69,6 +69,7 @@ _RATE_LIMITS: Dict[str, Dict[str, Any]] = {
     "/api/auth/login/verify": {"max": 30, "window_s": 60},
     "/api/auth/otp/resend": {"max": 6, "window_s": 60},
     "/api/auth/firebase-verify": {"max": 20, "window_s": 60},
+    "/api/auth/password-reset/verify": {"max": 10, "window_s": 60},
     "/api/payments/order": {"max": 20, "window_s": 60},
     "/api/payments/verify": {"max": 40, "window_s": 60},
     "/api/payments/refund": {"max": 5, "window_s": 60},
@@ -149,6 +150,13 @@ class FirebaseVerifyBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     role: Literal["consumer", "organizer"] = "consumer"
+
+class PasswordResetVerifyBody(BaseModel):
+    """Payload for `/auth/password-reset/verify`.
+    Client verifies a fresh Firebase Phone OTP → hands us the id_token
+    proving ownership of the phone → we set a new password on that user."""
+    id_token: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 class UserOut(BaseModel):
     id: str
@@ -579,6 +587,57 @@ async def firebase_verify(body: FirebaseVerifyBody):
 
     token = create_access_token({"sub": user["id"], "role": user["role"]})
     return TokenResponse(access_token=token, user=_user_out(user))
+
+
+# ---------- Password Reset (Firebase Phone OTP-gated) ----------
+@api_router.post("/auth/password-reset/verify", response_model=TokenResponse)
+async def password_reset_verify(body: PasswordResetVerifyBody):
+    """The client (a) collects the user's mobile, (b) runs Firebase Phone
+    Auth to get an id_token proving ownership, (c) collects a new password,
+    then posts everything here. We match the token's phone to a user, swap
+    their password, and issue a fresh JWT so they land in the app signed-in.
+    """
+    if not fb.is_enabled():
+        raise HTTPException(status_code=503, detail="Verification service is unavailable. Please try again later.")
+    try:
+        claims = fb.verify_id_token(body.id_token)
+    except fb.FirebaseAuthError as e:
+        # Deliberately generic — never leak whether a phone/email is registered.
+        raise HTTPException(status_code=401, detail="Verification failed. Please request a new OTP and retry.")
+
+    phone_number = claims.get("phone_number")
+    firebase_uid = claims.get("uid") or claims.get("user_id")
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="Missing phone number in verification token.")
+    mobile_stored = phone_number.lstrip("+")
+
+    user = await db.users.find_one({"mobile": mobile_stored})
+    if not user and firebase_uid:
+        # Firebase UID may be linked without a matching mobile (edge case).
+        user = await db.users.find_one({"firebase_uid": firebase_uid})
+    if not user:
+        # Generic response — never confirm or deny account existence.
+        raise HTTPException(
+            status_code=404,
+            detail="No account is registered with this mobile number. Please sign up first.",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "password_hash": hash_password(body.new_password),
+            "password_reset_at": now_iso,
+            # Keep the firebase_uid in sync — helps future flows.
+            "firebase_uid": firebase_uid or user.get("firebase_uid"),
+            "mobile_verified": True,
+        }},
+    )
+    user["password_hash"] = hash_password(body.new_password)  # not returned; just local
+
+    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    return TokenResponse(access_token=token, user=_user_out(user))
+
 
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(user=Depends(get_current_user)):

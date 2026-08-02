@@ -121,6 +121,12 @@ export default function Login() {
             )}
           </Pressable>
 
+          <Link href="/(auth)/forgot-password" asChild>
+            <Pressable style={styles.forgotBtn} testID="go-forgot-btn">
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </Pressable>
+          </Link>
+
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don&apos;t have an account?</Text>
             <Link href={`/(auth)/register?role=${initialRole}` as any} asChild>
@@ -176,6 +182,16 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginTop: spacing.sm,
   },
   primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "600" },
+  forgotBtn: {
+    marginTop: spacing.md,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  forgotText: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "600",
+  },
   footer: {
     marginTop: "auto",
     flexDirection: "row", justifyContent: "center", gap: 6, paddingTop: spacing.xl,
