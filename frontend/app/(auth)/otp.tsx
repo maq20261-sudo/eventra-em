@@ -99,7 +99,9 @@ export default function OtpScreen() {
     setError(null);
     try {
       const rawMobile = session.mobile.replace(/\D/g, "");
-      const fresh = await sendOtp(rawMobile);
+      // forceResend=true tells the SDK to fire a fresh SMS instead of
+      // deduplicating with the original signInWithPhoneNumber call.
+      const fresh = await sendOtp(rawMobile, true);
       setPhoneSession({ ...session, confirmation: fresh });
       setMobileMasked(fresh.mobileMasked);
       setOtp("");

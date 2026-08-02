@@ -54,8 +54,10 @@ function resolveAuth(): any {
   throw new Error("Verification service unavailable. Please try again.");
 }
 
-/** Send OTP via Firebase Phone Auth. */
-export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
+/** Send OTP via phone auth. Pass `forceResend = true` from the OTP screen's
+ *  "Resend" button so Firebase issues a brand-new SMS instead of coalescing
+ *  it with the original request (which was silently dropping our resends). */
+export async function sendOtp(mobile: string, forceResend: boolean = false): Promise<PhoneConfirmation> {
   if (!RN_FIREBASE_AUTH_AVAILABLE) {
     throw new Error(
       "Phone sign-in isn't available on this platform. Please open GatherSpace on your phone to continue."
@@ -66,10 +68,12 @@ export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
     const authInstance = resolveAuth();
     let confirmation: any;
     // Prefer modular API (v25+); fall back to namespaced instance method.
+    // Both support the `forceResend` third arg — pass it through so tapping
+    // "Resend OTP" actually re-triggers SMS instead of being deduplicated.
     if (typeof _fbAuth.signInWithPhoneNumber === "function") {
-      confirmation = await _fbAuth.signInWithPhoneNumber(authInstance, e164);
+      confirmation = await _fbAuth.signInWithPhoneNumber(authInstance, e164, forceResend);
     } else if (typeof authInstance.signInWithPhoneNumber === "function") {
-      confirmation = await authInstance.signInWithPhoneNumber(e164);
+      confirmation = await authInstance.signInWithPhoneNumber(e164, forceResend);
     } else {
       throw new Error("Verification service unavailable. Please try again.");
     }
