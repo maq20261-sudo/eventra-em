@@ -1,5 +1,5 @@
 /**
- * Firebase Phone Auth wrapper — MODULAR API for RN Firebase v25+.
+ * Phone-OTP verification wrapper (native only).
  *
  * On web/Expo Go the native module isn't linked; we lazy-load and expose
  * `isPhoneAuthSupported()` so callers can degrade gracefully.
@@ -48,10 +48,10 @@ export function maskE164(e164: string): string {
  *  version of RN Firebase exposes. v25+ uses the modular `getAuth()`,
  *  older versions used a callable default export `auth()`. Support both. */
 function resolveAuth(): any {
-  if (!_fbAuth) throw new Error("Firebase Auth module not loaded");
+  if (!_fbAuth) throw new Error("Verification service unavailable. Please try again.");
   if (typeof _fbAuth.getAuth === "function") return _fbAuth.getAuth();
   if (typeof _fbAuth.default === "function") return _fbAuth.default();
-  throw new Error("Firebase Auth API not recognized in this environment");
+  throw new Error("Verification service unavailable. Please try again.");
 }
 
 /** Send OTP via Firebase Phone Auth. */
@@ -71,7 +71,7 @@ export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
     } else if (typeof authInstance.signInWithPhoneNumber === "function") {
       confirmation = await authInstance.signInWithPhoneNumber(e164);
     } else {
-      throw new Error("signInWithPhoneNumber is not available in this Firebase Auth build.");
+      throw new Error("Verification service unavailable. Please try again.");
     }
     return { __confirmation: confirmation, mobileMasked: maskE164(e164) };
   } catch (e: any) {
@@ -79,15 +79,16 @@ export async function sendOtp(mobile: string): Promise<PhoneConfirmation> {
     if (code.includes("invalid-phone-number"))
       throw new Error("Invalid phone number. Use a 10-digit Indian mobile (starts 6/7/8/9).");
     if (code.includes("too-many-requests"))
-      throw new Error(
-        "Firebase limits how often codes can be sent to the same number. Please wait a few minutes before requesting another OTP."
-      );
+      throw new Error("Too many attempts. Please retry after sometime.");
+    if (code.includes("quota-exceeded"))
+      throw new Error("Daily limit reached for this number. Please try again tomorrow.");
     if (code.includes("missing-client-identifier") || code.includes("app-not-authorized"))
       throw new Error(
-        "This app isn't yet authorised for Firebase Phone Auth. Please add the build's SHA-1 fingerprint in Firebase Console → your Android app → Add fingerprint, then retry."
+        "This device isn't yet authorised for verification. Please contact support."
       );
-    if (code.includes("network")) throw new Error("Network error. Please check your connection and retry.");
-    throw new Error(e?.message || "Couldn't send OTP");
+    if (code.includes("network"))
+      throw new Error("Network error. Please check your connection and retry.");
+    throw new Error(e?.message || "Couldn't send OTP. Please try again.");
   }
 }
 
@@ -100,7 +101,7 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
     const credential = await conf.__confirmation.confirm(otp);
     const authInstance = resolveAuth();
     const currentUser = credential?.user || authInstance.currentUser;
-    if (!currentUser) throw new Error("No signed-in Firebase user after verify");
+    if (!currentUser) throw new Error("Verification session expired. Please try again.");
     // Modular getIdToken(user, forceRefresh) OR instance-method getIdToken(forceRefresh)
     let idToken: string | null = null;
     if (typeof _fbAuth.getIdToken === "function") {
