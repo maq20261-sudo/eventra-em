@@ -61,6 +61,7 @@ export const api = {
     request("/auth/login/start", { method: "POST", body: JSON.stringify(body) }),
   loginVerify: (body: { challenge_id: string; otp: string }) =>
     request("/auth/login/verify", { method: "POST", body: JSON.stringify(body) }),
+  logout: () => request("/auth/logout", { method: "POST" }),
   otpResend: (body: { challenge_id: string }) =>
     request("/auth/otp/resend", { method: "POST", body: JSON.stringify(body) }),
 

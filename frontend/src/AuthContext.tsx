@@ -64,10 +64,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Ask the server to invalidate any outstanding JWTs (fire-and-forget —
+    // if the network's down we still clear the local session).
+    try { await api.logout(); } catch { /* ignore */ }
     await setToken(null);
     setUser(null);
-    // Also clear Firebase session on native builds so the same device can
-    // sign in as a different phone number without a stale currentUser.
     await firebaseSignOut();
   };
 

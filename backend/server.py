@@ -313,11 +313,32 @@ def create_access_token(payload: dict) -> str:
     data["exp"] = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
+def _mint_user_token(user: dict) -> str:
+    """Include a per-user `tv` (token version) claim so we can invalidate all
+    outstanding sessions by bumping the field in Mongo (e.g. on password
+    reset / logout). Sessions issued before the bump will fail the tv
+    equality check in `get_current_user` and be rejected.
+
+    Default 0 (not 1) so that a `$inc` on a missing field — which starts
+    from 0 and lands at 1 — is properly distinguished from tokens minted
+    before the bump.
+    """
+    return create_access_token({
+        "sub": user["id"],
+        "role": user["role"],
+        "tv": int(user.get("token_version", 0)),
+    })
+
+async def _bump_token_version(user_id: str) -> None:
+    """Invalidate every JWT previously issued for this user."""
+    await db.users.update_one({"id": user_id}, {"$inc": {"token_version": 1}})
+
 async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security)):
     token = creds.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
+        token_version = payload.get("tv", 1)
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
     except jwt.PyJWTError:
@@ -325,6 +346,9 @@ async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(securit
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # SEC hardening: reject stale sessions after password reset / logout.
+    if int(user.get("token_version", 0)) != int(token_version):
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
     return user
 
 def require_role(role: str):
@@ -386,7 +410,8 @@ async def register(body: UserCreate):
     "consumer" and "organizer" (two independent accounts) so long as the
     role differs — we only reject a duplicate (email, role) pair."""
     if await db.users.find_one({"email": body.email, "role": body.role}):
-        raise HTTPException(status_code=400, detail="Email already registered as this role. Please sign in instead.")
+        # Neutral message to avoid confirming account existence to attackers.
+        raise HTTPException(status_code=400, detail="Unable to register with these details. Please sign in if you already have an account.")
     user_id = str(uuid.uuid4())
     doc = {
         "id": user_id,
@@ -397,9 +422,10 @@ async def register(body: UserCreate):
         "mobile": body.mobile,
         "mobile_verified": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "token_version": 0,
     }
     await db.users.insert_one(doc)
-    token = create_access_token({"sub": user_id, "role": body.role})
+    token = _mint_user_token(doc)
     return TokenResponse(access_token=token, user=_user_out(doc))
 
 @api_router.post("/auth/login")
@@ -411,6 +437,13 @@ async def login(body: UserLogin):
     # lets a user share the same password (or different ones) across roles.
     all_users = await db.users.find({"email": body.email}).to_list(None)
     matched = [u for u in all_users if verify_password(body.password, u["password_hash"])]
+
+    # SEC-003: constant-work path. If no candidate accounts exist, still run
+    # a dummy bcrypt verify so response time doesn't distinguish "unknown
+    # email" from "wrong password".
+    if not all_users:
+        verify_password(body.password, "$2b$12$" + "a" * 53)
+
     if not matched:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -418,7 +451,8 @@ async def login(body: UserLogin):
     if body.role:
         matched = [u for u in matched if u["role"] == body.role]
         if not matched:
-            raise HTTPException(status_code=401, detail="Invalid email or password for this role")
+            # Uniform message — never disclose whether the role exists.
+            raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if len(matched) > 1:
         # Two accounts (attendee + organizer) both matched. Ask the client
@@ -431,7 +465,7 @@ async def login(body: UserLogin):
         }
 
     user = matched[0]
-    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    token = _mint_user_token(user)
     return TokenResponse(access_token=token, user=_user_out(user)).model_dump()
 
 # ---------- OTP-gated Auth (MSG91) ----------
@@ -514,9 +548,10 @@ async def register_verify(body: OtpVerify):
         "mobile_verified": True,
         "mobile_verified_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "token_version": 0,
     }
     await db.users.insert_one(doc)
-    token = create_access_token({"sub": user_id, "role": doc["role"]})
+    token = _mint_user_token(doc)
     return TokenResponse(access_token=token, user=_user_out(doc))
 
 @api_router.post("/auth/login/start")
@@ -535,7 +570,7 @@ async def login_verify(body: OtpVerify):
     user = await db.users.find_one({"id": ch["extra"]["user_id"]})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    token = _mint_user_token(user)
     return TokenResponse(access_token=token, user=_user_out(user))
 
 @api_router.post("/auth/otp/resend")
@@ -615,10 +650,11 @@ async def firebase_verify(body: FirebaseVerifyBody):
         "firebase_uid": firebase_uid,
         "created_at": now_iso,
         "auth_provider": "firebase_phone",
+        "token_version": 0,
     }
     await db.users.insert_one(user)
 
-    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    token = _mint_user_token(user)
     return TokenResponse(access_token=token, user=_user_out(user))
 
 
@@ -677,17 +713,30 @@ async def password_reset_verify(body: PasswordResetVerifyBody):
             # Keep the firebase_uid in sync — helps future flows.
             "firebase_uid": firebase_uid or user.get("firebase_uid"),
             "mobile_verified": True,
-        }},
+        },
+         # SEC: invalidate every previously-issued JWT so an attacker who
+         # already stole a token can't stay signed in through a reset.
+         "$inc": {"token_version": 1}},
     )
-    user["password_hash"] = hash_password(body.new_password)  # not returned; just local
+    # Reload so the newly-minted token carries the fresh token_version.
+    user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
 
-    token = create_access_token({"sub": user["id"], "role": user["role"]})
+    token = _mint_user_token(user)
     return TokenResponse(access_token=token, user=_user_out(user)).model_dump()
 
 
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(user=Depends(get_current_user)):
     return _user_out(user)
+
+
+@api_router.post("/auth/logout")
+async def logout(user=Depends(get_current_user)):
+    """Server-side logout — bumps the user's token_version so every JWT
+    already issued for them becomes invalid immediately (including any
+    stolen ones sitting on a compromised device)."""
+    await _bump_token_version(user["id"])
+    return {"ok": True, "message": "Signed out on all devices"}
 
 # ---------- Event Routes ----------
 
