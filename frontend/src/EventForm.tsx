@@ -56,7 +56,11 @@ export default function EventForm({ editId }: Props) {
   const [seatRows, setSeatRows] = useState("6");
   const [seatCols, setSeatCols] = useState("8");
   const [totalSeats, setTotalSeats] = useState("100");
-  const [timeSlots, setTimeSlots] = useState<string[]>([""]);
+  // Per-slot capacity: each slot is { time: label, capacity: number }.
+  // Default 50 seats per slot per product requirement.
+  const [timeSlots, setTimeSlots] = useState<{ time: string; capacity: number }[]>([
+    { time: "", capacity: 50 },
+  ]);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -79,7 +83,18 @@ export default function EventForm({ editId }: Props) {
         if (e.seat_rows) setSeatRows(String(e.seat_rows));
         if (e.seat_cols) setSeatCols(String(e.seat_cols));
         if (e.total_seats) setTotalSeats(String(e.total_seats));
-        if (e.time_slots) setTimeSlots(e.time_slots.length ? e.time_slots : [""]);
+        if (e.time_slots) {
+          // Backend returns time_slots as list of labels + slot_capacities map.
+          const labels: string[] = e.time_slots.length ? e.time_slots : [""];
+          const caps = e.slot_capacities || {};
+          const fallbackCap = e.slot_capacity && e.slot_capacity > 1 ? e.slot_capacity : 50;
+          setTimeSlots(
+            labels.map((label: string) => ({
+              time: label,
+              capacity: caps[label] ?? fallbackCap,
+            })),
+          );
+        }
       } catch (err) {
         console.log("Fetch edit error", err);
       } finally {
@@ -155,11 +170,18 @@ export default function EventForm({ editId }: Props) {
     } else if (bookingType === "general") {
       body.total_seats = parseInt(totalSeats) || 100;
     } else if (bookingType === "time_slot") {
-      body.time_slots = timeSlots.map((s) => s.trim()).filter(Boolean);
-      if (body.time_slots.length === 0) {
+      const cleaned = timeSlots
+        .map((s) => ({ time: s.time.trim(), capacity: Math.max(1, Math.floor(s.capacity || 0)) }))
+        .filter((s) => s.time.length > 0);
+      if (cleaned.length === 0) {
         setError("Please add at least one time slot.");
         return;
       }
+      if (cleaned.some((s) => !s.capacity || s.capacity < 1)) {
+        setError("Each time slot needs at least 1 seat.");
+        return;
+      }
+      body.time_slots = cleaned;
     }
     setLoading(true);
     try {
@@ -374,20 +396,39 @@ export default function EventForm({ editId }: Props) {
           {bookingType === "time_slot" && (
             <>
               <Label styles={styles}>Time Slots</Label>
+              <Text style={styles.slotHelper}>
+                Add each slot and how many seats it can hold.
+              </Text>
               {timeSlots.map((s, i) => (
-                <View key={i} style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
+                <View key={i} style={styles.slotRow}>
                   <TextInput
                     testID={`slot-input-${i}`}
-                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    style={[styles.input, styles.slotTimeInput]}
                     placeholder="e.g. 2:00 PM Session"
-                    value={s}
+                    value={s.time}
                     onChangeText={(v) => {
-                      const next = [...timeSlots]; next[i] = v; setTimeSlots(next);
+                      const next = [...timeSlots]; next[i] = { ...next[i], time: v }; setTimeSlots(next);
                     }}
                     placeholderTextColor={colors.muted}
                   />
+                  <View style={styles.slotCapWrap}>
+                    <TextInput
+                      testID={`slot-capacity-${i}`}
+                      style={[styles.input, styles.slotCapInput]}
+                      placeholder="Seats"
+                      keyboardType="number-pad"
+                      value={String(s.capacity)}
+                      onChangeText={(v) => {
+                        const n = parseInt(v.replace(/[^0-9]/g, "")) || 0;
+                        const next = [...timeSlots]; next[i] = { ...next[i], capacity: n }; setTimeSlots(next);
+                      }}
+                      placeholderTextColor={colors.muted}
+                    />
+                    <Text style={styles.slotCapUnit}>seats</Text>
+                  </View>
                   {timeSlots.length > 1 && (
                     <Pressable
+                      testID={`slot-remove-${i}`}
                       style={styles.slotRemove}
                       onPress={() => setTimeSlots(timeSlots.filter((_, idx) => idx !== i))}
                     >
@@ -396,7 +437,11 @@ export default function EventForm({ editId }: Props) {
                   )}
                 </View>
               ))}
-              <Pressable style={styles.addSlot} onPress={() => setTimeSlots([...timeSlots, ""])} testID="add-slot-btn">
+              <Pressable
+                style={styles.addSlot}
+                onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
+                testID="add-slot-btn"
+              >
                 <Ionicons name="add" size={16} color={colors.brand} />
                 <Text style={styles.addSlotText}>Add another slot</Text>
               </Pressable>
@@ -537,6 +582,21 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     padding: 8,
   },
   addSlotText: { color: colors.brand, fontWeight: "500" },
+  slotHelper: {
+    fontSize: 12, color: colors.muted,
+    marginBottom: spacing.sm, marginTop: -4,
+  },
+  slotRow: {
+    flexDirection: "row", alignItems: "center",
+    gap: spacing.sm, marginBottom: spacing.sm,
+  },
+  slotTimeInput: { flex: 1.4, marginBottom: 0 },
+  slotCapWrap: {
+    flex: 1,
+    flexDirection: "row", alignItems: "center", gap: 4,
+  },
+  slotCapInput: { flex: 1, marginBottom: 0, textAlign: "center", paddingHorizontal: 8 },
+  slotCapUnit: { fontSize: 12, color: colors.muted, fontWeight: "500" },
   slotRemove: {
     width: 44, height: 44, borderRadius: radius.md,
     alignItems: "center", justifyContent: "center",

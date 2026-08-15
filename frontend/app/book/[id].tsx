@@ -27,6 +27,8 @@ export default function Booking() {
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [numSeats, setNumSeats] = useState(1);
   const [slot, setSlot] = useState<string | null>(null);
+  // Group booking size for time_slot events (defaults to 1 for back-compat).
+  const [slotSeats, setSlotSeats] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,20 +61,47 @@ export default function Booking() {
     })();
   }, [id]);
 
+  const slotsInfo: Array<{ time: string; capacity: number; booked: number; remaining: number; sold_out: boolean }> = useMemo(() => {
+    if (!event) return [];
+    if (Array.isArray(event.slots_info)) return event.slots_info;
+    // Fallback for legacy responses without slots_info: synthesize from time_slots.
+    return (event.time_slots || []).map((t: string) => ({
+      time: t, capacity: event.slot_capacity || 1, booked: 0,
+      remaining: event.slot_capacity || 1, sold_out: booked.booked_slots.includes(t),
+    }));
+  }, [event, booked]);
+
+  const currentSlotInfo = useMemo(
+    () => slotsInfo.find((s) => s.time === slot) || null,
+    [slotsInfo, slot],
+  );
+
+  // Clamp slotSeats to the remaining seats of the picked slot.
+  useEffect(() => {
+    if (currentSlotInfo && slotSeats > currentSlotInfo.remaining) {
+      setSlotSeats(Math.max(1, currentSlotInfo.remaining));
+    }
+  }, [currentSlotInfo?.remaining]);
+
   const totalPrice = useMemo(() => {
     if (!event) return 0;
     if (event.booking_type === "seat_map") return event.price * selectedSeats.length;
     if (event.booking_type === "general") return event.price * numSeats;
+    if (event.booking_type === "time_slot") return event.price * Math.max(1, slotSeats);
     return event.price;
-  }, [event, selectedSeats, numSeats]);
+  }, [event, selectedSeats, numSeats, slotSeats]);
 
   const canProceed = useMemo(() => {
     if (!event) return false;
     if (event.booking_type === "seat_map") return selectedSeats.length > 0;
     if (event.booking_type === "general") return numSeats > 0;
-    if (event.booking_type === "time_slot") return !!slot;
+    if (event.booking_type === "time_slot") {
+      if (!slot) return false;
+      if (!currentSlotInfo) return true;
+      return slotSeats > 0 && slotSeats <= currentSlotInfo.remaining && !currentSlotInfo.sold_out;
+    }
     return false;
-  }, [event, selectedSeats, numSeats, slot]);
+  }, [event, selectedSeats, numSeats, slot, slotSeats, currentSlotInfo]);
 
   const toggleSeat = (seat: string) => {
     if (booked.booked_seats.includes(seat)) return;
@@ -92,7 +121,10 @@ export default function Booking() {
             kind: "booking",
             event_id: String(id),
             seats: event.booking_type === "seat_map" ? selectedSeats : undefined,
-            num_seats: event.booking_type === "general" ? numSeats : undefined,
+            num_seats:
+              event.booking_type === "general" ? numSeats
+              : event.booking_type === "time_slot" ? slotSeats
+              : undefined,
             time_slot: event.booking_type === "time_slot" ? slot : undefined,
           });
           setRzpOrder(order as any);
@@ -117,7 +149,10 @@ export default function Booking() {
       const body: any = { event_id: String(id) };
       if (event.booking_type === "seat_map") body.seats = selectedSeats;
       if (event.booking_type === "general") body.num_seats = numSeats;
-      if (event.booking_type === "time_slot") body.time_slot = slot;
+      if (event.booking_type === "time_slot") {
+        body.time_slot = slot;
+        if (slotSeats > 1) body.num_seats = slotSeats;
+      }
       const res = await api.createBooking(body);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSuccess(res);
@@ -194,13 +229,44 @@ export default function Booking() {
 
         {event.booking_type === "time_slot" && (
           <TimeSlots
-            slots={event.time_slots || []}
+            slotsInfo={slotsInfo}
             takenSlots={booked.booked_slots}
             value={slot}
-            onSelect={(s) => { Haptics.selectionAsync(); setSlot(s); }}
+            onSelect={(s) => { Haptics.selectionAsync(); setSlot(s); setSlotSeats(1); }}
             styles={styles}
             colors={colors}
           />
+        )}
+
+        {event.booking_type === "time_slot" && slot && currentSlotInfo && !currentSlotInfo.sold_out && currentSlotInfo.capacity > 1 && (
+          <View style={styles.slotStepperWrap}>
+            <Text style={styles.generalLabel}>How many seats?</Text>
+            <View style={styles.stepperRow}>
+              <Pressable
+                testID="slot-dec-btn"
+                style={styles.stepBtn}
+                onPress={() => { if (slotSeats > 1) { Haptics.selectionAsync(); setSlotSeats(slotSeats - 1); } }}
+              >
+                <Ionicons name="remove" size={22} color={colors.onSurface} />
+              </Pressable>
+              <Text style={styles.stepValue} testID="slot-seats-count">{slotSeats}</Text>
+              <Pressable
+                testID="slot-inc-btn"
+                style={styles.stepBtn}
+                onPress={() => {
+                  if (slotSeats < currentSlotInfo.remaining) {
+                    Haptics.selectionAsync();
+                    setSlotSeats(slotSeats + 1);
+                  }
+                }}
+              >
+                <Ionicons name="add" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <Text style={styles.slotStepperHint}>
+              {currentSlotInfo.remaining} of {currentSlotInfo.capacity} seat{currentSlotInfo.capacity === 1 ? "" : "s"} available
+            </Text>
+          </View>
         )}
 
         {event.price > 0 && totalPrice > 0 && (
@@ -426,28 +492,40 @@ function GeneralPicker({ total, takenGeneral, value, onChange, styles, colors }:
   );
 }
 
-function TimeSlots({ slots, takenSlots, value, onSelect, styles, colors }: {
-  slots: string[]; takenSlots: string[]; value: string | null; onSelect: (s: string) => void; styles: any; colors: Colors;
+function TimeSlots({ slotsInfo, takenSlots, value, onSelect, styles, colors }: {
+  slotsInfo: Array<{ time: string; capacity: number; booked: number; remaining: number; sold_out: boolean }>;
+  takenSlots: string[]; value: string | null; onSelect: (s: string) => void; styles: any; colors: Colors;
 }) {
   return (
     <View style={{ gap: spacing.md }}>
       <Text style={styles.generalLabel}>Available time slots</Text>
-      {slots.map((s) => {
-        const isTaken = takenSlots.includes(s);
+      {slotsInfo.map((info) => {
+        const s = info.time;
+        // Trust slots_info as the source of truth. Fall back to legacy
+        // takenSlots (only used if slots_info missing).
+        const soldOut = info.sold_out || (info.capacity <= 1 && takenSlots.includes(s));
         const isActive = value === s;
+        const remaining = info.remaining;
+        const capacity = info.capacity;
         return (
           <Pressable
             key={s}
             testID={`slot-${s}`}
-            style={[styles.slot, isActive && styles.slotActive, isTaken && styles.slotTaken]}
-            disabled={isTaken}
+            style={[styles.slot, isActive && styles.slotActive, soldOut && styles.slotTaken]}
+            disabled={soldOut}
             onPress={() => onSelect(s)}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.slotText, isActive && { color: colors.onBrandPrimary }, isTaken && { color: colors.muted }]}>
+              <Text style={[styles.slotText, isActive && { color: colors.onBrandPrimary }, soldOut && { color: colors.muted }]}>
                 {s}
               </Text>
-              {isTaken && <Text style={styles.slotTakenText}>Fully booked</Text>}
+              {soldOut ? (
+                <Text style={styles.slotTakenText}>Fully booked</Text>
+              ) : capacity > 1 ? (
+                <Text style={[styles.slotRemainingText, isActive && { color: colors.onBrandPrimary, opacity: 0.85 }]}>
+                  {remaining} of {capacity} seat{capacity === 1 ? "" : "s"} left
+                </Text>
+              ) : null}
             </View>
             {isActive && <Ionicons name="checkmark-circle" size={20} color={colors.onBrandPrimary} />}
           </Pressable>
@@ -553,6 +631,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   slotTaken: { backgroundColor: colors.surfaceTertiary, borderColor: colors.surfaceTertiary },
   slotText: { fontSize: 15, color: colors.onSurface, fontWeight: "500" },
   slotTakenText: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  slotRemainingText: { fontSize: 12, color: colors.muted, marginTop: 2, fontWeight: "500" },
+  slotStepperWrap: {
+    alignItems: "center", padding: spacing.xl, gap: spacing.md,
+    marginTop: spacing.lg,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.lg,
+  },
+  slotStepperHint: { fontSize: 12, color: colors.muted, marginTop: -4 },
 
   // Success
   successOverlay: {

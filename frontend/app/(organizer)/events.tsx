@@ -16,7 +16,8 @@ type Event = {
   id: string; title: string; date: string; image_url?: string;
   category: string; booked_count: number; location_name: string; price: number;
   booking_type: string; total_seats?: number; seat_rows?: number; seat_cols?: number;
-  time_slots?: string[]; is_featured?: boolean; featured_until?: string | null;
+  time_slots?: string[]; slot_capacities?: Record<string, number>; slot_capacity?: number;
+  is_featured?: boolean; featured_until?: string | null;
 };
 
 function fmt(iso: string) {
@@ -55,7 +56,13 @@ export default function OrganizerEvents() {
   const capacity = (e: Event) => {
     if (e.booking_type === "seat_map") return (e.seat_rows || 0) * (e.seat_cols || 0);
     if (e.booking_type === "general") return e.total_seats || 0;
-    if (e.booking_type === "time_slot") return e.time_slots?.length || 0;
+    if (e.booking_type === "time_slot") {
+      // Sum per-slot capacities, falling back to slot_capacity for legacy events.
+      const labels = e.time_slots || [];
+      const caps = e.slot_capacities || {};
+      const fallback = e.slot_capacity || 1;
+      return labels.reduce((sum, t) => sum + (caps[t] ?? fallback), 0);
+    }
     return 0;
   };
 

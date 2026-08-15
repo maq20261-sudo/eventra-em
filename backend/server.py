@@ -225,8 +225,10 @@ class EventCreate(BaseModel):
     seat_cols: Optional[int] = Field(default=None, ge=1, le=100)
     # For general
     total_seats: Optional[int] = Field(default=None, ge=1, le=1_000_000)
-    # For time_slot
-    time_slots: Optional[List[str]] = None  # list of ISO times or labels
+    # For time_slot — accepts either List[str] (legacy) or List[{"time":str, "capacity":int}] (new).
+    # Normalized to List[str] + slot_capacities dict in _normalize_time_slots below.
+    time_slots: Optional[List[Any]] = None
+    slot_capacity: Optional[int] = Field(default=1, ge=1, le=100_000)  # DEFAULT seats per slot (legacy fallback)
 
     @model_validator(mode="after")
     def _validate_image(self):
@@ -243,6 +245,9 @@ class EventUpdate(BaseModel):
     latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
     longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
     price: Optional[float] = Field(default=None, ge=0.0, le=10_000_000.0)
+    # For time_slot events: allow organizer to edit slots + per-slot capacity.
+    time_slots: Optional[List[Any]] = None
+    slot_capacity: Optional[int] = Field(default=None, ge=1, le=100_000)
 
     @model_validator(mode="after")
     def _validate_image(self):
@@ -265,6 +270,13 @@ class EventOut(BaseModel):
     seat_cols: Optional[int] = None
     total_seats: Optional[int] = None
     time_slots: Optional[List[str]] = None
+    slot_capacity: Optional[int] = 1
+    # Per-slot capacity map: {"10:00": 20, "11:00": 30, ...}. May be None on
+    # legacy events (fallback to `slot_capacity` for those).
+    slot_capacities: Optional[Dict[str, int]] = None
+    # Per-slot availability array parallel to `time_slots`:
+    #   [{time, capacity, booked, remaining, sold_out}]
+    slots_info: Optional[List[Dict[str, Any]]] = None
     organizer_id: str
     organizer_name: str
     booked_count: int = 0
@@ -387,6 +399,9 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
         "seat_cols": e.get("seat_cols"),
         "total_seats": e.get("total_seats"),
         "time_slots": e.get("time_slots"),
+        "slot_capacity": e.get("slot_capacity", 1),
+        "slot_capacities": e.get("slot_capacities"),
+        "slots_info": e.get("slots_info"),
         "organizer_id": e["organizer_id"],
         "organizer_name": e.get("organizer_name", "Organizer"),
         "booked_count": e.get("booked_count", 0),
@@ -738,12 +753,58 @@ async def logout(user=Depends(get_current_user)):
     await _bump_token_version(user["id"])
     return {"ok": True, "message": "Signed out on all devices"}
 
+# ---------- Event Helpers ----------
+
+DEFAULT_SLOT_CAPACITY = 50
+
+def _normalize_time_slots(raw: Any, default_capacity: int) -> tuple:
+    """Accept either List[str] (legacy) or List[{"time","capacity"}] (new).
+    Returns (time_slot_labels, {label: capacity}). Duplicates keep the last
+    capacity. Empty/blank labels are dropped. Capacity clamped to [1, 100_000].
+    """
+    labels: List[str] = []
+    caps: Dict[str, int] = {}
+    if not raw:
+        return labels, caps
+    for item in raw:
+        if isinstance(item, str):
+            label = item.strip()
+            cap = int(default_capacity or 1)
+        elif isinstance(item, dict):
+            label = str(item.get("time", "")).strip()
+            try:
+                cap = int(item.get("capacity") or default_capacity or 1)
+            except (TypeError, ValueError):
+                cap = int(default_capacity or 1)
+        else:
+            continue
+        if not label:
+            continue
+        cap = max(1, min(100_000, cap))
+        if label not in labels:
+            labels.append(label)
+        caps[label] = cap
+    return labels, caps
+
 # ---------- Event Routes ----------
 
 @api_router.post("/events", response_model=EventOut)
 async def create_event(body: EventCreate, user=Depends(require_role("organizer"))):
     event_id = str(uuid.uuid4())
     doc = body.model_dump()
+    # Normalize time_slots so we store labels + capacities separately.
+    if doc.get("booking_type") == "time_slot":
+        default_cap = int(doc.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
+        labels, caps = _normalize_time_slots(doc.get("time_slots"), default_cap)
+        if not labels:
+            raise HTTPException(status_code=400, detail="At least one time slot is required")
+        doc["time_slots"] = labels
+        doc["slot_capacities"] = caps
+        # Keep `slot_capacity` for legacy fallback but reflect the highest.
+        doc["slot_capacity"] = max(caps.values()) if caps else default_cap
+    else:
+        doc["time_slots"] = None
+        doc["slot_capacities"] = None
     doc.update({
         "id": event_id,
         "organizer_id": user["id"],
@@ -753,7 +814,9 @@ async def create_event(body: EventCreate, user=Depends(require_role("organizer")
     })
     await db.events.insert_one(doc)
     doc.pop("_id", None)
-    return event_doc_to_out(doc)
+    out = event_doc_to_out(doc)
+    out["slots_info"] = await _compute_slots_info(doc)
+    return out
 
 @api_router.get("/events", response_model=List[EventOut])
 async def list_events(
@@ -792,12 +855,44 @@ async def list_events(
     results.sort(key=sort_key)
     return results
 
+async def _compute_slots_info(e: dict) -> Optional[List[Dict[str, Any]]]:
+    """For time_slot events, returns per-slot availability so the client can
+    show "N seats left" and disable sold-out slots."""
+    if e.get("booking_type") != "time_slot" or not e.get("time_slots"):
+        return None
+    fallback_cap = int(e.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
+    slot_caps: Dict[str, int] = e.get("slot_capacities") or {}
+    # Count confirmed / checked-in bookings grouped by slot, summing num_seats
+    # so that group time-slot bookings (>1 seat per booking) are counted
+    # correctly.
+    cursor = db.bookings.aggregate([
+        {"$match": {"event_id": e["id"], "status": {"$in": ["confirmed", "checked_in"]}}},
+        {"$group": {"_id": "$time_slot", "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
+    ])
+    counts = {row["_id"]: row["n"] async for row in cursor}
+    out = []
+    for slot in e["time_slots"]:
+        cap = int(slot_caps.get(slot, fallback_cap))
+        booked = int(counts.get(slot, 0))
+        remaining = max(0, cap - booked)
+        out.append({
+            "time": slot,
+            "capacity": cap,
+            "booked": booked,
+            "remaining": remaining,
+            "sold_out": remaining <= 0,
+        })
+    return out
+
+
 @api_router.get("/events/{event_id}", response_model=EventOut)
 async def get_event(event_id: str):
     e = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not e:
         raise HTTPException(status_code=404, detail="Event not found")
-    return event_doc_to_out(e)
+    out = event_doc_to_out(e)
+    out["slots_info"] = await _compute_slots_info(e)
+    return out
 
 @api_router.put("/events/{event_id}", response_model=EventOut)
 async def update_event(event_id: str, body: EventUpdate, user=Depends(require_role("organizer"))):
@@ -807,10 +902,26 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
+    # If organizer is updating time_slots on a time_slot event, normalize them
+    # into labels + capacities. This lets them add slots or adjust per-slot
+    # capacity later.
+    if "time_slots" in update_data and e.get("booking_type") == "time_slot":
+        default_cap = int(update_data.get("slot_capacity") or e.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
+        labels, caps = _normalize_time_slots(update_data["time_slots"], default_cap)
+        if not labels:
+            raise HTTPException(status_code=400, detail="At least one time slot is required")
+        update_data["time_slots"] = labels
+        update_data["slot_capacities"] = caps
+        update_data["slot_capacity"] = max(caps.values()) if caps else default_cap
+    elif "time_slots" in update_data:
+        # Non-time_slot events can't have time_slots.
+        update_data.pop("time_slots", None)
     if update_data:
         await db.events.update_one({"id": event_id}, {"$set": update_data})
     updated = await db.events.find_one({"id": event_id}, {"_id": 0})
-    return event_doc_to_out(updated)
+    out = event_doc_to_out(updated)
+    out["slots_info"] = await _compute_slots_info(updated)
+    return out
 
 @api_router.delete("/events/{event_id}")
 async def delete_event(event_id: str, user=Depends(require_role("organizer"))):
@@ -840,10 +951,11 @@ async def _reconcile_event_availability(event_id: str) -> dict:
         if b.get("seats"):
             booked_seats.extend(b["seats"])
             booked_count += len(b["seats"])
-        if b.get("time_slot"):
+        elif b.get("time_slot"):
+            # Group time-slot bookings support num_seats > 1 (defaults to 1).
             booked_slots.append(b["time_slot"])
-            booked_count += 1
-        if b.get("num_seats"):
+            booked_count += int(b.get("num_seats") or 1)
+        elif b.get("num_seats"):
             booked_count += int(b["num_seats"] or 0)
     return await db.events.find_one_and_update(
         {"id": event_id},
@@ -934,16 +1046,43 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         if booking_type == "time_slot":
             if not body.time_slot:
                 raise HTTPException(status_code=400, detail="Please pick a time slot")
-            price = event["price"]
-            units = 1
-            cond = {
-                "id": body.event_id,
-                "booked_slots": {"$ne": body.time_slot},
-            }
-            upd = {
-                "$inc": {"booked_count": units},
-                "$push": {"booked_slots": body.time_slot},
-            }
+            if body.time_slot not in (event.get("time_slots") or []):
+                raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
+            # Per-slot capacity (falls back to slot_capacity for legacy events).
+            slot_caps: Dict[str, int] = event.get("slot_capacities") or {}
+            fallback_cap = int(event.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
+            slot_cap = int(slot_caps.get(body.time_slot, fallback_cap))
+            # Allow group booking: num_seats optional, defaults to 1 for back-compat.
+            units = int(body.num_seats or 1)
+            if units < 1:
+                raise HTTPException(status_code=400, detail="Please choose at least 1 seat")
+            price = event["price"] * units
+            # Sum booked seats for this slot from confirmed/checked_in bookings.
+            agg = db.bookings.aggregate([
+                {"$match": {
+                    "event_id": body.event_id,
+                    "time_slot": body.time_slot,
+                    "status": {"$in": ["confirmed", "checked_in"]},
+                }},
+                {"$group": {"_id": None, "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
+            ])
+            existing = 0
+            async for row in agg:
+                existing = int(row.get("n") or 0)
+            if existing + units > slot_cap:
+                remaining = max(0, slot_cap - existing)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"Only {remaining} seat(s) left in this slot." if remaining > 0
+                            else f"This slot is fully booked ({slot_cap}/{slot_cap} seats)."),
+                )
+            # Atomic guard: increment global booked_count; mark slot in
+            # booked_slots array once it becomes full so legacy clients still
+            # see it as unavailable.
+            cond = {"id": body.event_id}
+            upd = {"$inc": {"booked_count": units}}
+            if existing + units >= slot_cap:
+                upd["$addToSet"] = {"booked_slots": body.time_slot}
             return price, units, await db.events.find_one_and_update(cond, upd)
 
         raise HTTPException(status_code=400, detail="Invalid booking type")
@@ -978,7 +1117,9 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         "event_id": body.event_id,
         "user_id": user["id"],
         "seats": body.seats,
-        "num_seats": body.num_seats,
+        # For time_slot events, `num_units` reflects the actual number of
+        # seats booked (defaults to 1). For general, it mirrors body.num_seats.
+        "num_seats": num_units if booking_type in ("general", "time_slot") else body.num_seats,
         "time_slot": body.time_slot,
         "total_price": total_price,
         "status": "confirmed",
@@ -1406,7 +1547,10 @@ def _compute_booking_amount(event: dict, seats: Optional[List[str]], num_seats: 
     if bt == "time_slot":
         if not time_slot:
             raise HTTPException(status_code=400, detail="Please pick a time slot")
-        return event["price"]
+        units = int(num_seats or 1)
+        if units < 1:
+            units = 1
+        return event["price"] * units
     raise HTTPException(status_code=400, detail="Invalid booking type")
 
 @api_router.get("/payments/config")

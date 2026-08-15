@@ -1,0 +1,37 @@
+{
+  "summary": "Per-slot capacity feature (time_slot events) fully verified — backend + frontend. All 90 pre-existing pytest tests still pass; added 4 new verification tests in tests/test_iteration_10_verify.py (edit-event, payment pricing, legacy migration back-fill, organizer capacity SUM) — total 94/94 passed. Migration script 001_time_slot_capacities.py is idempotent (re-ran: 36 events scanned, 0 updated, 36 skipped). Frontend Playwright flow: created a time_slot event with per-slot capacities [3, 5], verified default seats=50 in EventForm, verified organizer 'My Events' list shows capacity SUM as 0/8, then as consumer booked the 2 PM slot with num_seats=3 via 'Pay at venue' — confirmation modal shows ₹300 total (100 × 3). Stepper clamps to remaining (over-increment stops at capacity). Per-slot 'X of Y seats left' rendered exactly as spec'd. Payment order endpoint charges amount_paise = price × num_seats × 100 = 30000 for 3 × ₹100.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/events (list)", "issue": "List endpoint returns slots_info=null for time_slot events (only detail endpoint /api/events/{id} computes it). Frontend booking screen correctly synthesizes fallback, but any list-only consumer would miss remaining/booked info per slot. Non-blocking — considered by design (perf)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_10_verify.py",
+    "/app/backend/tests/test_time_slot_capacity.py",
+    "/app/test_reports/pytest/iteration_10_full.xml"
+  ],
+  "action_items": [
+    "Optional: populate slots_info in list responses for time_slot events (or at least remaining_by_slot) so consumers can see availability without a per-event GET. Not needed for MVP.",
+    "No blocking action items — feature is production-ready."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1860 lines — well past the 700-line guideline. Split into modules (auth, events, bookings, payments, otp, migrations) at earliest opportunity.",
+    "_compute_slots_info() correctly aggregates via Mongo aggregate($sum of num_seats defaulting to 1) — matches the atomic booking guard's counting logic. Verified with the fills-up test (2 seats + 3 seats + cancel-and-refill scenarios all agree)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_10_verify.py (new — 4 verification tests)"
+  ],
+  "success_rate": {"backend": "100% (94/94)", "frontend": "100% (create-event, per-slot capacities, booking with num_seats, stepper clamp, payment total, booking confirmation)"},
+  "seed_data_creation": "One organizer event 'TEST_i10_PerSlotUI' (id=e9ae73b6-...) created via UI with slots [10 AM: 3 seats, 2 PM: 5 seats]. One consumer booking against that event's 2 PM slot for 3 seats via pay-at-venue. All prior TEST_ users/events from previous iterations remain (177 events total in organizer list). No cleanup performed (matches prior iteration convention).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Per-slot capacity is live end-to-end. `time_slots` in API responses is List[str] (labels only). Per-slot capacities live in `slot_capacities: Dict[str,int]` and `slots_info: List[{time,capacity,booked,remaining,sold_out}]`. `num_seats` is supported for both `general` and `time_slot` bookings. Frontend EventForm passes `time_slots: [{time,capacity},...]` — backend `_normalize_time_slots` splits into labels + slot_capacities. When testing frontend, note: (a) tab-create testID does NOT exist — use `new-event-btn` from within organizer events list to reach the create form; (b) 'organizer_only=true' events list does NOT populate slots_info (only /events/{id} detail does); (c) slot cards on booking screen use testID `slot-{label}` where {label} is the raw label including spaces (e.g. `slot-10 AM`).",
+  "rca_of_issue": "N/A — feature-addition verification, no bugs found."
+}
