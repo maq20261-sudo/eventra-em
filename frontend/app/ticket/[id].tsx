@@ -102,11 +102,18 @@ export default function TicketScreen() {
 
   const e = booking.event;
   const qrPayload = JSON.stringify({ t: "gs-ticket", id: booking.id });
-  const seatLine = booking.seats?.length
+  const isTimeSlot = !!booking.time_slot;
+  // Order matters: time_slot may co-exist with num_seats>1 (group booking),
+  // so check time_slot first.
+  const seatLine = isTimeSlot
+    ? (booking.num_seats && booking.num_seats > 1
+        ? `${booking.time_slot} · ${booking.num_seats} seats`
+        : booking.time_slot)
+    : booking.seats?.length
     ? booking.seats.join(", ")
     : booking.num_seats
     ? `${booking.num_seats} × ticket`
-    : booking.time_slot;
+    : "General";
 
   const isCancelled = booking.status === "cancelled";
   const isPaidOnline = booking.payment_status === "paid";
@@ -167,6 +174,26 @@ export default function TicketScreen() {
               <Text style={styles.metaText}>{e.location_name}</Text>
             </View>
 
+            {isTimeSlot && (
+              <View style={styles.slotHighlight} testID="ticket-slot-banner">
+                <View style={styles.slotHighlightIcon}>
+                  <Ionicons name="time" size={18} color={colors.onBrandPrimary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.slotHighlightLabel}>Your time slot</Text>
+                  <Text style={styles.slotHighlightValue} numberOfLines={1}>
+                    {booking.time_slot}
+                  </Text>
+                </View>
+                {booking.num_seats && booking.num_seats > 1 && (
+                  <View style={styles.slotSeatsBadge}>
+                    <Ionicons name="people" size={12} color={colors.onBrandPrimary} />
+                    <Text style={styles.slotSeatsText}>{booking.num_seats}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             <View style={styles.dashRow}>
               {Array.from({ length: 24 }).map((_, i) => <View key={i} style={styles.dash} />)}
             </View>
@@ -174,7 +201,7 @@ export default function TicketScreen() {
             <View style={styles.detailsRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.smallLabel}>
-                  {booking.seats ? "Seats" : booking.num_seats ? "Tickets" : "Time slot"}
+                  {isTimeSlot ? "Time slot" : booking.seats ? "Seats" : booking.num_seats ? "Tickets" : "Entry"}
                 </Text>
                 <Text style={styles.smallValue}>{seatLine}</Text>
               </View>
@@ -391,6 +418,33 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
 
   dashRow: { flexDirection: "row", justifyContent: "space-between", marginVertical: spacing.md },
   dash: { width: 6, height: 1, backgroundColor: colors.borderStrong },
+
+  slotHighlight: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    marginTop: spacing.md,
+  },
+  slotHighlightIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center", justifyContent: "center",
+  },
+  slotHighlightLabel: {
+    fontSize: 11, color: colors.onBrandPrimary, opacity: 0.85,
+    letterSpacing: 0.5, textTransform: "uppercase", fontWeight: "600",
+  },
+  slotHighlightValue: {
+    fontSize: 17, color: colors.onBrandPrimary, fontWeight: "700", marginTop: 2,
+  },
+  slotSeatsBadge: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: radius.pill,
+    paddingHorizontal: 10, paddingVertical: 4,
+  },
+  slotSeatsText: { fontSize: 13, color: colors.onBrandPrimary, fontWeight: "700" },
 
   detailsRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
   smallLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },

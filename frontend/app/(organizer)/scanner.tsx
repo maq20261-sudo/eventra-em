@@ -8,6 +8,7 @@ import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { ticketTypeLine } from "@/src/utils/ticketLabel";
 
 type Preview = {
   ok: boolean;
@@ -27,20 +28,6 @@ type Confirmed = {
   booking?: any;
   already_checked_in?: boolean;
 };
-
-function ticketTypeLine(booking: any): { label: string; icon: any } {
-  if (!booking) return { label: "-", icon: "ticket-outline" };
-  if (booking.seats?.length) {
-    return { label: `Seats · ${booking.seats.join(", ")}`, icon: "grid-outline" };
-  }
-  if (booking.num_seats) {
-    return { label: `${booking.num_seats} × General Admission`, icon: "people-outline" };
-  }
-  if (booking.time_slot) {
-    return { label: `Time slot · ${booking.time_slot}`, icon: "time-outline" };
-  }
-  return { label: "General Admission", icon: "ticket-outline" };
-}
 
 export default function Scanner() {
   const { colors } = useTheme();
@@ -278,6 +265,19 @@ export default function Scanner() {
 
                 <Text style={styles.eventTitle} numberOfLines={2}>{preview?.event_title}</Text>
 
+                {preview?.booking?.time_slot && (
+                  <View style={styles.slotHighlight} testID="scan-slot-banner">
+                    <Ionicons name="time" size={18} color={colors.onBrandPrimary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.slotHighlightLabel}>Time slot</Text>
+                      <Text style={styles.slotHighlightValue} numberOfLines={1}>
+                        {preview.booking.time_slot}
+                        {preview.booking.num_seats > 1 ? `  ·  ${preview.booking.num_seats} seats` : ""}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
                 <View style={styles.rowBlock}>
                   <View style={styles.rowIcon}>
                     <Ionicons name="person" size={16} color={colors.brand} />
@@ -386,6 +386,15 @@ export default function Scanner() {
               <View style={styles.attendeeRow}>
                 <Ionicons name="person-outline" size={16} color={colors.onSurfaceTertiary} />
                 <Text style={styles.attendeeName}>{confirmed.attendee_name}</Text>
+              </View>
+            )}
+            {confirmed?.booking?.time_slot && (
+              <View style={styles.slotSuccessBanner} testID="success-slot-banner">
+                <Ionicons name="time" size={16} color={colors.brand} />
+                <Text style={styles.slotSuccessText}>
+                  {confirmed.booking.time_slot}
+                  {confirmed.booking.num_seats > 1 ? `  ·  ${confirmed.booking.num_seats} seats` : ""}
+                </Text>
               </View>
             )}
             <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-next-btn">
@@ -549,6 +558,28 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   successSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
   attendeeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.sm },
   attendeeName: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
+  slotHighlight: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    marginTop: spacing.md,
+  },
+  slotHighlightLabel: {
+    fontSize: 11, color: colors.onBrandPrimary, opacity: 0.85,
+    letterSpacing: 0.5, textTransform: "uppercase", fontWeight: "600",
+  },
+  slotHighlightValue: {
+    fontSize: 16, color: colors.onBrandPrimary, fontWeight: "700", marginTop: 2,
+  },
+  slotSuccessBanner: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    marginTop: spacing.sm,
+  },
+  slotSuccessText: { fontSize: 13, color: colors.brand, fontWeight: "600" },
   resultIcon: {
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: colors.brandPrimary,

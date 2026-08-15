@@ -127,12 +127,16 @@ export default function MyBookings() {
               </View>
 
               <View style={styles.bottom}>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.smallLabel}>
-                    {b.seats ? "Seats" : b.num_seats ? "Tickets" : "Time slot"}
+                    {b.time_slot ? "Time slot" : b.seats ? "Seats" : b.num_seats ? "Tickets" : "Entry"}
                   </Text>
                   <Text style={styles.smallValue} numberOfLines={1}>
-                    {b.seats?.join(", ") || (b.num_seats ? `${b.num_seats} × ticket` : b.time_slot)}
+                    {b.time_slot
+                      ? (b.num_seats && b.num_seats > 1
+                          ? `${b.time_slot} · ${b.num_seats} seats`
+                          : b.time_slot)
+                      : b.seats?.join(", ") || (b.num_seats ? `${b.num_seats} × ticket` : "General")}
                   </Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
