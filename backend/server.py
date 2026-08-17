@@ -258,6 +258,11 @@ class EventCreate(BaseModel):
     # slot_capacities dict in _normalize_time_slots below.
     time_slots: Optional[List[Any]] = None
     slot_capacity: Optional[int] = Field(default=1, ge=1, le=100_000)  # DEFAULT seats per slot (legacy fallback)
+    # When the organizer has used up their first-5-free perk, the client
+    # must create a `kind=platform_fee` payment intent first, verify it via
+    # Razorpay, then pass the resulting intent_id here to prove the fee
+    # was paid. Ignored while the organizer is still in the free tier.
+    platform_intent_id: Optional[str] = None
 
     @model_validator(mode="after")
     def _validate_dates_and_image(self):
@@ -995,8 +1000,35 @@ def _normalize_time_slots(raw: Any, default_capacity: int) -> tuple:
 
 @api_router.post("/events", response_model=EventOut)
 async def create_event(body: EventCreate, user=Depends(require_role("organizer"))):
+    # Enforce first-5-free perk + platform fee for event #6 onwards.
+    fee_info = await _resolve_organizer_fee(user["id"])
+    if not fee_info["waived"]:
+        # Beyond the free tier — organizer must pay the platform fee first.
+        pid = body.platform_intent_id
+        if not pid:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "message": (
+                        f"You've used all {_organizer_free_limit()} free events. "
+                        f"A ₹{PLATFORM_FEE_ORGANIZER_PAISE/100:.0f} platform fee applies to this event."
+                    ),
+                    "fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
+                    "requires_platform_fee": True,
+                },
+            )
+        # Verify the intent is paid, belongs to this user, and hasn't been
+        # consumed by a previous event (single-use).
+        intent = await db.payment_intents.find_one({"id": pid}, {"_id": 0})
+        if not intent or intent.get("user_id") != user["id"] or intent.get("kind") != "platform_fee":
+            raise HTTPException(status_code=400, detail="Invalid platform fee payment.")
+        if intent.get("status") != "paid":
+            raise HTTPException(status_code=402, detail="Platform fee not yet paid.")
+        if intent.get("consumed_for_event_id"):
+            raise HTTPException(status_code=400, detail="This platform fee payment was already used for another event.")
     event_id = str(uuid.uuid4())
     doc = body.model_dump()
+    doc.pop("platform_intent_id", None)  # never persist on the event
     # Normalize time_slots — now supported for BOTH time_slot AND seat_map
     # events (seat_map + slots = same grid, different availability per slot).
     if doc.get("booking_type") == "time_slot":
@@ -1022,8 +1054,18 @@ async def create_event(body: EventCreate, user=Depends(require_role("organizer")
         "organizer_name": user["name"],
         "booked_count": 0,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "platform_fee_paid_paise": (
+            int(fee_info["fee_paise"]) if not fee_info["waived"] else 0
+        ),
+        "platform_fee_waived": bool(fee_info["waived"]),
     })
     await db.events.insert_one(doc)
+    # Mark the platform fee intent as consumed for single-use guarantee.
+    if not fee_info["waived"] and body.platform_intent_id:
+        await db.payment_intents.update_one(
+            {"id": body.platform_intent_id},
+            {"$set": {"consumed_for_event_id": event_id}},
+        )
     doc.pop("_id", None)
     out = event_doc_to_out(doc)
     out["slots_info"] = await _compute_slots_info(doc)
@@ -1831,8 +1873,104 @@ async def checkin_booking(body: CheckInRequest, user=Depends(require_role("organ
 
 # ---------- Payments (Razorpay) ----------
 
+# --- Platform-fee & first-N-free perks (June 2026) ---
+# NB: paise everywhere for Razorpay; ₹ shown to the user.
+PLATFORM_FEE_ATTENDEE_PAISE = int(os.environ.get("PLATFORM_FEE_ATTENDEE_PAISE", 900))   # ₹9 per PAID booking beyond the free tier
+PLATFORM_FEE_ORGANIZER_PAISE = int(os.environ.get("PLATFORM_FEE_ORGANIZER_PAISE", 1900))  # ₹19 per event creation beyond the free tier
+ATTENDEE_FREE_BOOKING_LIMIT = int(os.environ.get("ATTENDEE_FREE_BOOKING_LIMIT", 5))
+ORGANIZER_FREE_EVENT_LIMIT = int(os.environ.get("ORGANIZER_FREE_EVENT_LIMIT", 5))
+
+
+def _attendee_free_limit() -> int:
+    return int(os.environ.get("ATTENDEE_FREE_BOOKING_LIMIT", ATTENDEE_FREE_BOOKING_LIMIT))
+
+
+def _organizer_free_limit() -> int:
+    return int(os.environ.get("ORGANIZER_FREE_EVENT_LIMIT", ORGANIZER_FREE_EVENT_LIMIT))
+
+
+async def _attendee_paid_booking_count(user_id: str) -> int:
+    """Count of PAID (non-free) confirmed bookings — free events don't count
+    against the free-booking perk since they never incur a platform fee."""
+    return await db.bookings.count_documents({
+        "user_id": user_id,
+        "status": {"$in": ["confirmed", "checked_in"]},
+        "total_price": {"$gt": 0},
+    })
+
+
+async def _organizer_event_count(user_id: str) -> int:
+    return await db.events.count_documents({"organizer_id": user_id})
+
+
+async def _resolve_booking_fee(user_id: str, ticket_subtotal_inr: float) -> Dict[str, Any]:
+    """Compute the attendee-side platform fee + free-tier waiver for a booking.
+    Free events (ticket_subtotal_inr == 0) incur NO fee. Otherwise the fee
+    is waived for the first N paid bookings per attendee."""
+    if ticket_subtotal_inr <= 0:
+        return {"fee_paise": 0, "waived": False, "reason": "free_event",
+                "used": 0, "remaining": _attendee_free_limit()}
+    used = await _attendee_paid_booking_count(user_id)
+    limit = _attendee_free_limit()
+    remaining = max(0, limit - used)
+    if remaining > 0:
+        return {"fee_paise": 0, "waived": True, "reason": "free_tier",
+                "used": used, "remaining": remaining}
+    return {"fee_paise": PLATFORM_FEE_ATTENDEE_PAISE, "waived": False, "reason": "standard",
+            "used": used, "remaining": 0}
+
+
+async def _resolve_organizer_fee(user_id: str) -> Dict[str, Any]:
+    """Compute the organizer-side platform fee + first-5-free waiver for
+    creating a new event."""
+    used = await _organizer_event_count(user_id)
+    limit = _organizer_free_limit()
+    remaining = max(0, limit - used)
+    if remaining > 0:
+        return {"fee_paise": 0, "waived": True, "reason": "free_tier",
+                "used": used, "remaining": remaining}
+    return {"fee_paise": PLATFORM_FEE_ORGANIZER_PAISE, "waived": False, "reason": "standard",
+            "used": used, "remaining": 0}
+
+
+@api_router.get("/pricing/config")
+async def pricing_config():
+    """Public snapshot of platform-fee amounts + free-tier limits so the
+    client can render "N of 5 free left" hints even before hitting checkout."""
+    return {
+        "attendee_platform_fee_inr": PLATFORM_FEE_ATTENDEE_PAISE / 100.0,
+        "organizer_platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
+        "attendee_free_booking_limit": ATTENDEE_FREE_BOOKING_LIMIT,
+        "organizer_free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
+    }
+
+
+@api_router.get("/quota/me")
+async def my_quota(user=Depends(get_current_user)):
+    """Returns the current user's usage against the two free tiers so the
+    UI can show 'You have N free events left' / 'N free bookings left'."""
+    out: Dict[str, Any] = {}
+    if user.get("role") == "organizer":
+        used = await _organizer_event_count(user["id"])
+        out["organizer"] = {
+            "events_used": used,
+            "free_events_remaining": max(0, ORGANIZER_FREE_EVENT_LIMIT - used),
+            "free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
+            "platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
+        }
+    else:
+        used = await _attendee_paid_booking_count(user["id"])
+        out["attendee"] = {
+            "paid_bookings_used": used,
+            "free_bookings_remaining": max(0, ATTENDEE_FREE_BOOKING_LIMIT - used),
+            "free_booking_limit": ATTENDEE_FREE_BOOKING_LIMIT,
+            "platform_fee_inr": PLATFORM_FEE_ATTENDEE_PAISE / 100.0,
+        }
+    return out
+
+
 class PaymentOrderCreate(BaseModel):
-    kind: Literal["booking", "boost"]
+    kind: Literal["booking", "boost", "platform_fee"]
     # For kind=booking
     event_id: Optional[str] = None
     seats: Optional[List[str]] = None
@@ -1898,11 +2036,29 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
-        amount_inr = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
-        if amount_inr <= 0:
+        ticket_subtotal_inr = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
+        # Attendee-side platform fee (₹9) with first-5-free waiver.
+        fee_info = await _resolve_booking_fee(user["id"], ticket_subtotal_inr)
+        fee_paise = int(fee_info["fee_paise"])
+        ticket_paise = int(round(ticket_subtotal_inr * 100))
+        amount_paise = ticket_paise + fee_paise
+        amount_inr = amount_paise / 100.0
+        if amount_paise <= 0:
             raise HTTPException(status_code=400, detail="Free event — no payment needed")
-        amount_paise = int(round(amount_inr * 100))
         description = f"Booking · {event['title']}"
+
+    elif body.kind == "platform_fee":
+        if user["role"] != "organizer":
+            raise HTTPException(status_code=403, detail="Organizers only")
+        fee_info = await _resolve_organizer_fee(user["id"])
+        if fee_info["waived"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"You still have {fee_info['remaining']} free event(s). No payment needed yet.",
+            )
+        amount_paise = int(fee_info["fee_paise"])
+        amount_inr = amount_paise / 100.0
+        description = "Platform fee · Publish event"
 
     elif body.kind == "boost":
         if user["role"] != "organizer":
@@ -1949,7 +2105,7 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
     }
     await db.payment_intents.insert_one(intent_doc)
 
-    return {
+    resp: Dict[str, Any] = {
         "intent_id": intent_id,
         "razorpay_order_id": rzp_order["id"],
         "razorpay_key_id": RAZORPAY_KEY_ID,
@@ -1962,6 +2118,18 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
             "email": user.get("email", ""),
         },
     }
+    # Attach a client-friendly breakdown for booking payments so the checkout
+    # can show "Ticket ₹X + Platform Fee ₹9 (or FREE — 3 left)".
+    if body.kind == "booking":
+        resp["breakdown"] = {
+            "ticket_inr": ticket_paise / 100.0,
+            "platform_fee_inr": fee_paise / 100.0,
+            "fee_waived": bool(fee_info.get("waived")),
+            "free_bookings_remaining_after_this": max(
+                0, int(fee_info.get("remaining", 0)) - (1 if fee_info.get("waived") else 0)
+            ),
+        }
+    return resp
 
 @api_router.post("/payments/verify")
 async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
@@ -2010,6 +2178,11 @@ async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
         )
         booking = await _perform_booking(booking_body, user, payment=payment_info)
         result = {"kind": "booking", "booking": booking.model_dump()}
+    elif kind == "platform_fee":
+        # No side-effect at verify time — client will use `intent_id` when
+        # posting POST /api/events to prove the fee was paid. Marking the
+        # intent as `paid` locks it against replay (see event-create guard).
+        result = {"kind": "platform_fee", "platform_intent_id": intent["id"]}
     elif kind == "boost":
         boost_res = await _apply_boost(payload["boost_event_id"], user, payload["tier"], payment=payment_info)
         result = {"kind": "boost", **boost_res}

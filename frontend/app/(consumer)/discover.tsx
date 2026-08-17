@@ -34,6 +34,8 @@ import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
+import { useQuota } from "@/src/hooks/usePricing";
+import { useAuth } from "@/src/AuthContext";
 
 const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
   { key: "All", label: "All", icon: "sparkles-outline", color: "#EF4444" },
@@ -174,6 +176,8 @@ export default function Discover() {
   const [locModalOpen, setLocModalOpen] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const router = useRouter();
+  const { user } = useAuth();
+  const { quota } = useQuota(!!user);
 
   const load = useCallback(async () => {
     try {
@@ -407,6 +411,26 @@ export default function Discover() {
         </ScrollView>
       </View>
 
+      {/* Free-tier offer banner — surfaced ABOVE the events list so it's
+          visible even when the feed is empty (fresh users need to see the
+          "5 free bookings" perk first). */}
+      {quota?.attendee && quota.attendee.free_bookings_remaining > 0 && !loading && (
+        <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm }}>
+          <View style={styles.offerBanner} testID="offer-banner">
+            <View style={styles.offerBannerIcon}>
+              <Ionicons name="gift" size={20} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.offerBannerTitle}>Your first 5 bookings are FREE 🎉</Text>
+              <Text style={styles.offerBannerSub}>
+                {quota.attendee.free_bookings_remaining} of {quota.attendee.free_booking_limit} free
+                booking{quota.attendee.free_bookings_remaining === 1 ? "" : "s"} left · no ₹{quota.attendee.platform_fee_inr} platform fee
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.brand} /></View>
       ) : events.length === 0 ? (
@@ -424,6 +448,8 @@ export default function Discover() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
           showsVerticalScrollIndicator={false}
         >
+          {/* Removed duplicate banner — it now lives above the ScrollView so
+              it shows even when the feed is empty. */}
           {featuredEvents.length > 0 && (
             <View style={styles.featuredSection}>
               <View style={styles.sectionHeader}>
@@ -662,6 +688,18 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
   list: { padding: spacing.lg, gap: spacing.lg },
+  offerBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: "#0F766E",
+    borderRadius: radius.lg, padding: spacing.md,
+  },
+  offerBannerIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  offerBannerTitle: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  offerBannerSub: { color: "rgba(255,255,255,0.85)", fontSize: 12, marginTop: 2 },
   card: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,

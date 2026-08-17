@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput,
   ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
@@ -11,6 +11,8 @@ import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
 import LocationPicker from "@/src/LocationPicker";
+import RazorpayCheckout from "@/src/RazorpayCheckout";
+import { useQuota } from "@/src/hooks/usePricing";
 import * as ImagePicker from "expo-image-picker";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
@@ -65,6 +67,11 @@ export default function EventForm({ editId }: Props) {
   ]);
   // Modal state for the "drop-a-pin on map" picker.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Platform-fee flow: for event #6+ the organizer must pay ₹19 first.
+  const { quota, refresh: refreshQuota } = useQuota(true);
+  const [rzpOrder, setRzpOrder] = useState<any | null>(null);
+  const [rzpVisible, setRzpVisible] = useState(false);
+  const pendingBodyRef = useRef<any | null>(null);
 
 
   useEffect(() => {
@@ -189,7 +196,21 @@ export default function EventForm({ editId }: Props) {
       if (isEdit && editId) {
         await api.updateEvent(editId, body);
       } else {
-        await api.createEvent(body);
+        try {
+          await api.createEvent(body);
+        } catch (err: any) {
+          // 402 → quota exhausted; kick off the platform-fee Razorpay flow.
+          const detail = err?.detail ?? err?.data?.detail;
+          if (detail?.requires_platform_fee) {
+            const order = await api.createPaymentOrder({ kind: "platform_fee" });
+            pendingBodyRef.current = body;
+            setRzpOrder(order);
+            setRzpVisible(true);
+            setLoading(false);
+            return;
+          }
+          throw err;
+        }
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(organizer)/events" as any);
@@ -198,6 +219,28 @@ export default function EventForm({ editId }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Called after Razorpay checkout succeeds for the ₹19 platform fee.
+  const onPlatformFeeVerified = async (verifyPayload: any) => {
+    setRzpVisible(false);
+    setLoading(true);
+    try {
+      const res = await api.verifyPayment(verifyPayload);
+      const intentId = res?.result?.platform_intent_id;
+      if (!intentId) throw new Error("Platform fee verification failed");
+      const bodyWithFee = { ...(pendingBodyRef.current || {}), platform_intent_id: intentId };
+      await api.createEvent(bodyWithFee);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      refreshQuota();
+      router.replace("/(organizer)/events" as any);
+    } catch (e: any) {
+      setError(e?.message || "Payment succeeded but event creation failed. Please try again.");
+    } finally {
+      setLoading(false);
+      setRzpOrder(null);
+      pendingBodyRef.current = null;
     }
   };
 
@@ -243,6 +286,35 @@ export default function EventForm({ editId }: Props) {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 200 }}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Free-tier / platform-fee banner for organizers. */}
+          {!isEdit && quota?.organizer && (
+            quota.organizer.free_events_remaining > 0 ? (
+              <View style={[styles.quotaBanner, styles.quotaFree]} testID="quota-banner-free">
+                <Ionicons name="gift" size={18} color="#0F766E" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.quotaTitleFree}>Your first 5 events are FREE 🎉</Text>
+                  <Text style={styles.quotaSubFree}>
+                    {quota.organizer.free_events_remaining} of {quota.organizer.free_event_limit} free
+                    event{quota.organizer.free_events_remaining === 1 ? "" : "s"} left
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={[styles.quotaBanner, styles.quotaPaid]} testID="quota-banner-paid">
+                <Ionicons name="card" size={18} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.quotaTitlePaid}>
+                    Publish fee: ₹{quota.organizer.platform_fee_inr}
+                  </Text>
+                  <Text style={styles.quotaSubPaid}>
+                    You&apos;ve used all {quota.organizer.free_event_limit} free events.
+                    You&apos;ll be prompted to pay before publishing.
+                  </Text>
+                </View>
+              </View>
+            )
+          )}
+
           <Label styles={styles}>Event Title</Label>
           <TextInput testID="title-input" style={styles.input} placeholder="Sunset Symphony" value={title} onChangeText={setTitle} placeholderTextColor={colors.muted} />
 
@@ -512,7 +584,13 @@ export default function EventForm({ editId }: Props) {
           >
             {loading ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
               <>
-                <Text style={styles.submitText}>{isEdit ? "Save Changes" : "Publish Event"}</Text>
+                <Text style={styles.submitText}>
+                  {isEdit
+                    ? "Save Changes"
+                    : quota?.organizer && quota.organizer.free_events_remaining <= 0
+                    ? `Publish for ₹${quota.organizer.platform_fee_inr}`
+                    : "Publish Event"}
+                </Text>
                 <Ionicons name="rocket" size={18} color={colors.onBrandPrimary} />
               </>
             )}
@@ -529,12 +607,27 @@ export default function EventForm({ editId }: Props) {
         onSelect={(loc) => {
           setLatitude(String(loc.latitude));
           setLongitude(String(loc.longitude));
-          // Only auto-fill the name if the field is empty — never clobber
-          // a place name the organizer already picked from Google search.
           if (!locationName || locationName.length === 0) {
             setLocationName(loc.label);
           }
           setPickerOpen(false);
+        }}
+      />
+
+      <RazorpayCheckout
+        visible={rzpVisible}
+        order={rzpOrder}
+        onSuccess={onPlatformFeeVerified}
+        onCancel={() => {
+          setRzpVisible(false);
+          setRzpOrder(null);
+          pendingBodyRef.current = null;
+          setError("Publish payment cancelled. Try again when you're ready.");
+        }}
+        onError={(msg) => {
+          setRzpVisible(false);
+          setRzpOrder(null);
+          setError(msg || "Payment failed");
         }}
       />
     </SafeAreaView>
@@ -611,6 +704,23 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   pinAdjustText: {
     flex: 1, color: colors.onSurface, fontSize: 14, fontWeight: "500",
   },
+  quotaBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    borderRadius: radius.lg, padding: spacing.md,
+    marginBottom: spacing.lg, borderWidth: 1,
+  },
+  quotaFree: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#86EFAC",
+  },
+  quotaPaid: {
+    backgroundColor: colors.brandTertiary,
+    borderColor: colors.brandPrimary,
+  },
+  quotaTitleFree: { color: "#065F46", fontSize: 14, fontWeight: "700" },
+  quotaSubFree: { color: "#0F766E", fontSize: 12, marginTop: 2 },
+  quotaTitlePaid: { color: colors.brand, fontSize: 14, fontWeight: "700" },
+  quotaSubPaid: { color: colors.onSurfaceSecondary || colors.muted, fontSize: 12, marginTop: 2 },
   locPicker: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary,

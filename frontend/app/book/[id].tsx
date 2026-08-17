@@ -10,12 +10,16 @@ import { api } from "@/src/api";
 import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { useQuota } from "@/src/hooks/usePricing";
+import { useAuth } from "@/src/AuthContext";
 
 const SEAT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 export default function Booking() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const { user } = useAuth();
+  const { quota, refresh: refreshQuota } = useQuota(!!user);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [event, setEvent] = useState<any>(null);
@@ -110,6 +114,18 @@ export default function Booking() {
     return event.price;
   }, [event, selectedSeats, numSeats, slotSeats]);
 
+  // Attendee platform fee (₹9) — waived while the user still has free
+  // bookings in their perk. Free events never incur a fee.
+  const platformFee = useMemo(() => {
+    if (!event || totalPrice <= 0) return 0;
+    const remaining = quota?.attendee?.free_bookings_remaining ?? 0;
+    if (remaining > 0) return 0;
+    return quota?.attendee?.platform_fee_inr ?? 9;
+  }, [event, totalPrice, quota]);
+
+  const feeWaived = totalPrice > 0 && platformFee === 0;
+  const grandTotal = totalPrice + platformFee;
+
   const canProceed = useMemo(() => {
     if (!event) return false;
     if (event.booking_type === "seat_map") {
@@ -183,6 +199,7 @@ export default function Booking() {
       const res = await api.createBooking(body);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSuccess(res);
+      refreshQuota();
     } catch (e: any) {
       setError(e?.message || "Booking failed");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -317,6 +334,40 @@ export default function Booking() {
         )}
 
         {event.price > 0 && totalPrice > 0 && (
+          <View style={styles.breakdownCard} testID="fee-breakdown">
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Ticket subtotal</Text>
+              <Text style={styles.breakdownValue}>₹{totalPrice.toFixed(0)}</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                <Text style={styles.breakdownLabel}>Platform fee</Text>
+                {feeWaived && (
+                  <View style={styles.freeChip}>
+                    <Ionicons name="gift-outline" size={11} color="#0F766E" />
+                    <Text style={styles.freeChipText}>FREE</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.breakdownValue, feeWaived && styles.strikePrice]}>
+                ₹{(quota?.attendee?.platform_fee_inr ?? 9).toFixed(0)}
+              </Text>
+            </View>
+            {feeWaived && quota?.attendee && (
+              <Text style={styles.freeHint}>
+                🎉 {quota.attendee.free_bookings_remaining} of {quota.attendee.free_booking_limit} free
+                booking{quota.attendee.free_bookings_remaining === 1 ? "" : "s"} left
+              </Text>
+            )}
+            <View style={styles.breakdownDivider} />
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownTotalLabel}>Total</Text>
+              <Text style={styles.breakdownTotalValue}>₹{grandTotal.toFixed(0)}</Text>
+            </View>
+          </View>
+        )}
+
+        {event.price > 0 && totalPrice > 0 && (
           <View style={styles.payMethodBlock}>
             <Text style={styles.payMethodTitle}>Payment method</Text>
             <PayMethodOption
@@ -351,7 +402,7 @@ export default function Booking() {
           <View>
             <Text style={styles.stickyLabel}>Total</Text>
             <Text style={styles.stickyPrice}>
-              {totalPrice > 0 ? `₹${totalPrice.toFixed(0)}` : "Free"}
+              {grandTotal > 0 ? `₹${grandTotal.toFixed(0)}` : "Free"}
             </Text>
           </View>
           <Pressable
@@ -724,9 +775,37 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
 
   // Payment method selector
   payMethodBlock: {
-    marginTop: spacing.lg,
-    gap: spacing.sm,
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
   },
+  breakdownCard: {
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  breakdownRow: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingVertical: 6,
+  },
+  breakdownLabel: { color: colors.muted, fontSize: 14 },
+  breakdownValue: { color: colors.onSurface, fontSize: 14, fontWeight: "500" },
+  strikePrice: { textDecorationLine: "line-through", color: colors.muted },
+  freeChip: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    backgroundColor: "#DCFCE7",
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
+  freeChipText: { color: "#0F766E", fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
+  freeHint: { color: "#0F766E", fontSize: 12, fontWeight: "500", marginTop: 2, marginBottom: 4 },
+  breakdownDivider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
+  breakdownTotalLabel: { color: colors.onSurface, fontSize: 15, fontWeight: "700" },
+  breakdownTotalValue: { color: colors.brand, fontSize: 18, fontWeight: "800" },
   payMethodTitle: {
     fontSize: 16, fontWeight: "700", color: colors.onSurface,
     marginBottom: 4,

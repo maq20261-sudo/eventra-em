@@ -122,6 +122,10 @@ export const api = {
     request("/places/details", { method: "POST", body: JSON.stringify(body) }),
   reverseGeocode: (body: { latitude: number; longitude: number }) =>
     request("/places/reverse", { method: "POST", body: JSON.stringify(body) }),
+
+  // ---- Platform fees & free-tier perks ----
+  pricingConfig: () => request("/pricing/config", { method: "GET" }),
+  myQuota: () => request("/quota/me", { method: "GET" }),
   myOrgEvents: () => request(`/organizer/events`, { method: "GET" }, true),
 
   // Bookings
