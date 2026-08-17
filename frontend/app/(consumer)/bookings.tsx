@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { ticketTypeLabel } from "@/src/utils/ticketLabel";
 
 type Booking = {
   id: string;
@@ -128,15 +129,17 @@ export default function MyBookings() {
 
               <View style={styles.bottom}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.smallLabel}>
-                    {b.time_slot ? "Time slot" : b.seats ? "Seats" : b.num_seats ? "Tickets" : "Entry"}
-                  </Text>
+                  <Text style={styles.smallLabel}>{ticketTypeLabel(b)}</Text>
                   <Text style={styles.smallValue} numberOfLines={1}>
-                    {b.time_slot
+                    {b.seats?.length
+                      ? (b.time_slot ? `${b.seats.join(", ")} · ${b.time_slot}` : b.seats.join(", "))
+                      : b.time_slot
                       ? (b.num_seats && b.num_seats > 1
                           ? `${b.time_slot} · ${b.num_seats} seats`
                           : b.time_slot)
-                      : b.seats?.join(", ") || (b.num_seats ? `${b.num_seats} × ticket` : "General")}
+                      : b.num_seats
+                      ? `${b.num_seats} × ticket`
+                      : "General"}
                   </Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>

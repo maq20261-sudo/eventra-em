@@ -13,6 +13,7 @@ import EventMap from "@/src/EventMap";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { eventDateRange } from "@/src/utils/eventDate";
+import { ticketTypeLabel, ticketTypeValue } from "@/src/utils/ticketLabel";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -104,17 +105,10 @@ export default function TicketScreen() {
   const e = booking.event;
   const qrPayload = JSON.stringify({ t: "gs-ticket", id: booking.id });
   const isTimeSlot = !!booking.time_slot;
-  // Order matters: time_slot may co-exist with num_seats>1 (group booking),
-  // so check time_slot first.
-  const seatLine = isTimeSlot
-    ? (booking.num_seats && booking.num_seats > 1
-        ? `${booking.time_slot} · ${booking.num_seats} seats`
-        : booking.time_slot)
-    : booking.seats?.length
-    ? booking.seats.join(", ")
-    : booking.num_seats
-    ? `${booking.num_seats} × ticket`
-    : "General";
+  const hasSeats = !!(booking.seats && booking.seats.length);
+  // Priority lives in one place — @/src/utils/ticketLabel.
+  const primaryLabel = ticketTypeLabel(booking);
+  const seatLine = ticketTypeValue(booking);
 
   const isCancelled = booking.status === "cancelled";
   const isPaidOnline = booking.payment_status === "paid";
@@ -186,12 +180,14 @@ export default function TicketScreen() {
                     {booking.time_slot}
                   </Text>
                 </View>
-                {booking.num_seats && booking.num_seats > 1 && (
+                {(hasSeats && booking.seats.length >= 1) || (booking.num_seats && booking.num_seats > 1) ? (
                   <View style={styles.slotSeatsBadge}>
                     <Ionicons name="people" size={12} color={colors.onBrandPrimary} />
-                    <Text style={styles.slotSeatsText}>{booking.num_seats}</Text>
+                    <Text style={styles.slotSeatsText}>
+                      {hasSeats ? booking.seats.length : booking.num_seats}
+                    </Text>
                   </View>
-                )}
+                ) : null}
               </View>
             )}
 
@@ -201,9 +197,7 @@ export default function TicketScreen() {
 
             <View style={styles.detailsRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.smallLabel}>
-                  {isTimeSlot ? "Time slot" : booking.seats ? "Seats" : booking.num_seats ? "Tickets" : "Entry"}
-                </Text>
+                <Text style={styles.smallLabel}>{primaryLabel}</Text>
                 <Text style={styles.smallValue}>{seatLine}</Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
