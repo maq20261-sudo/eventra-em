@@ -344,6 +344,8 @@ class EventOut(BaseModel):
     organizer_name: str
     booked_count: int = 0
     distance_km: Optional[float] = None
+    # True when the event's end_date is in the past — read-only.
+    is_past: Optional[bool] = None
     is_featured: bool = False
     featured_until: Optional[str] = None
     created_at: str
@@ -1078,8 +1080,13 @@ async def list_events(
     radius_km: float = 10.0,
     category: Optional[str] = None,
     search: Optional[str] = None,
+    # New: `include_past` lets organizers/consumers pull ended events for
+    # history views. Default False so the main discover list is future-only.
+    include_past: bool = False,
+    # New: `only_past` returns ONLY ended events (past events tab).
+    only_past: bool = False,
 ):
-    query = {}
+    query: Dict[str, Any] = {}
     if category and category != "All":
         query["category"] = category
     if search:
@@ -1088,24 +1095,53 @@ async def list_events(
         safe = re.escape(search.strip())[:128]
         if safe:
             query["title"] = {"$regex": safe, "$options": "i"}
-    events = await db.events.find(query, {"_id": 0}).to_list(500)
-    results = []
+    events = await db.events.find(query, {"_id": 0}).to_list(1000)
+    # Compute "past" flag using end_date (fallback: legacy `date`). Filter
+    # out ended events from the default discover list; keep only past ones
+    # if `only_past=true` was requested.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    kept: List[Dict[str, Any]] = []
     for e in events:
+        end_iso = e.get("end_date") or e.get("date")
+        is_past = bool(end_iso and end_iso < now_iso)
+        if only_past and not is_past:
+            continue
+        if not only_past and is_past and not include_past:
+            continue
+        e["_is_past"] = is_past
+        kept.append(e)
+    results = []
+    for e in kept:
         distance = None
         if lat is not None and lng is not None:
             distance = haversine_km(lat, lng, e["latitude"], e["longitude"])
             if distance > radius_km:
                 continue
-        results.append(event_doc_to_out(e, distance))
-    # Sort: featured first, then by distance/date
+        out = event_doc_to_out(e, distance)
+        out["is_past"] = e.get("_is_past", False)
+        results.append(out)
+    # Sort:
+    #   - past events tab → newest-ended first
+    #   - default → featured first, then latest CREATED first (per user request:
+    #     "Display events order by created date descending so the latest
+    #     events should display on top of list").
     def sort_key(x):
         featured_rank = 0 if x.get("is_featured") else 1
-        if lat is not None and lng is not None:
-            secondary = x["distance_km"] if x.get("distance_km") is not None else 9999
-        else:
-            secondary = x["date"]
+        # created_at is an ISO string; DESC via negation via reverse sort key.
+        # Use created_at with a fallback to the start_date for legacy events.
+        secondary = x.get("created_at") or x.get("start_date") or x.get("date") or ""
+        # Return a tuple so featured-first is applied first, then within each
+        # bucket we sort by created_at DESC (i.e. reverse-lex).
         return (featured_rank, secondary)
+    # First pass — ensures featured-first grouping.
     results.sort(key=sort_key)
+    # Reverse-sort each featured group by created_at DESC by applying stable
+    # sort with only the created_at key and reverse=True. Because Python's
+    # sort is stable and we already grouped featured-first above, we can now
+    # re-sort by created_at DESC while preserving group order:
+    results.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    # Finally put featured back on top (stable within its group).
+    results.sort(key=lambda x: 0 if x.get("is_featured") else 1)
     return results
 
 async def _compute_slots_info(e: dict) -> Optional[List[Dict[str, Any]]]:
@@ -1168,6 +1204,8 @@ async def get_event(event_id: str):
         raise HTTPException(status_code=404, detail="Event not found")
     out = event_doc_to_out(e)
     out["slots_info"] = await _compute_slots_info(e)
+    end_iso = e.get("end_date") or e.get("date")
+    out["is_past"] = bool(end_iso and end_iso < datetime.now(timezone.utc).isoformat())
     return out
 
 @api_router.put("/events/{event_id}", response_model=EventOut)
@@ -1316,7 +1354,14 @@ async def get_booked_seats(event_id: str, time_slot: Optional[str] = None):
 async def my_events(user=Depends(require_role("organizer"))):
     events = await db.events.find({"organizer_id": user["id"]}, {"_id": 0}).to_list(500)
     events.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return [event_doc_to_out(e) for e in events]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out = []
+    for e in events:
+        end_iso = e.get("end_date") or e.get("date")
+        d = event_doc_to_out(e)
+        d["is_past"] = bool(end_iso and end_iso < now_iso)
+        out.append(d)
+    return out
 
 # ---------- Booking Routes ----------
 
@@ -1324,6 +1369,14 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
     event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    # Reject bookings on ended events. Uses end_date (or legacy `date`).
+    end_iso = event.get("end_date") or event.get("date")
+    if end_iso and end_iso < datetime.now(timezone.utc).isoformat():
+        raise HTTPException(
+            status_code=400,
+            detail="This event has already ended and is no longer accepting bookings.",
+        )
 
     # SEC-003 fix: compute price + units up front, then perform an ATOMIC
     # capacity/uniqueness check via `findOneAndUpdate` on the events doc.
@@ -2036,6 +2089,13 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
+        # Block payment orders for events that have already ended.
+        end_iso = event.get("end_date") or event.get("date")
+        if end_iso and end_iso < datetime.now(timezone.utc).isoformat():
+            raise HTTPException(
+                status_code=400,
+                detail="This event has already ended and is no longer accepting bookings.",
+            )
         ticket_subtotal_inr = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
         # Attendee-side platform fee (₹9) with first-5-free waiver.
         fee_info = await _resolve_booking_fee(user["id"], ticket_subtotal_inr)

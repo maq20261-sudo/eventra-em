@@ -13,11 +13,13 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
 type Event = {
-  id: string; title: string; date: string; image_url?: string;
+  id: string; title: string; date: string; start_date?: string; end_date?: string;
+  image_url?: string;
   category: string; booked_count: number; location_name: string; price: number;
   booking_type: string; total_seats?: number; seat_rows?: number; seat_cols?: number;
   time_slots?: string[]; slot_capacities?: Record<string, number>; slot_capacity?: number;
   is_featured?: boolean; featured_until?: string | null;
+  is_past?: boolean;
 };
 
 function fmt(iso: string) {
@@ -145,27 +147,38 @@ export default function OrganizerEvents() {
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         >
-          {events.map((e) => {
-            const cap = capacity(e);
-            const pct = cap > 0 ? Math.min(100, Math.round((e.booked_count / cap) * 100)) : 0;
-            return (
-              <View key={e.id} style={styles.card} testID={`org-event-${e.id}`}>
-                <Pressable
-                  style={styles.cardTop}
-                  onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
-                >
-                  <Image source={e.image_url} style={styles.thumb} contentFit="cover" />
-                  <View style={styles.body}>
-                    <View style={styles.rowTop}>
-                      <View style={styles.catBadge}><Text style={styles.catText}>{e.category}</Text></View>
-                      <Text style={styles.date}>{fmt(e.start_date || e.date)}</Text>
-                    </View>
-                    <Text style={styles.eventTitle} numberOfLines={1}>{e.title}</Text>
-                    <View style={styles.metaRow}>
-                      <Ionicons name="location-outline" size={12} color={colors.muted} />
-                      <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
-                    </View>
-                    <View style={styles.progressWrap}>
+          {(() => {
+            // Split events into Upcoming and Past groups so ended events
+            // move out of the primary list into a "Past Events" section.
+            const upcoming = events.filter((x) => !x.is_past);
+            const past = events.filter((x) => x.is_past);
+            const renderCard = (e: Event, dim: boolean = false) => {
+              const cap = capacity(e);
+              const pct = cap > 0 ? Math.min(100, Math.round((e.booked_count / cap) * 100)) : 0;
+              return (
+                <View key={e.id} style={[styles.card, dim && { opacity: 0.65 }]} testID={`org-event-${e.id}`}>
+                  <Pressable
+                    style={styles.cardTop}
+                    onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
+                  >
+                    <Image source={e.image_url} style={styles.thumb} contentFit="cover" />
+                    <View style={styles.body}>
+                      <View style={styles.rowTop}>
+                        <View style={styles.catBadge}><Text style={styles.catText}>{e.category}</Text></View>
+                        <Text style={styles.date}>{fmt(e.start_date || e.date)}</Text>
+                      </View>
+                      <Text style={styles.eventTitle} numberOfLines={1}>{e.title}</Text>
+                      <View style={styles.metaRow}>
+                        <Ionicons name="location-outline" size={12} color={colors.muted} />
+                        <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
+                      </View>
+                      {dim && (
+                        <View style={styles.endedChip}>
+                          <Ionicons name="time-outline" size={11} color={colors.muted} />
+                          <Text style={styles.endedChipText}>Ended</Text>
+                        </View>
+                      )}
+                      <View style={styles.progressWrap}>
                       <View style={styles.progressBg}>
                         <View style={[styles.progressFill, { width: `${pct}%` }]} />
                       </View>
@@ -195,7 +208,30 @@ export default function OrganizerEvents() {
                 </View>
               </View>
             );
-          })}
+            };  // end renderCard
+            return (
+              <>
+                {upcoming.length === 0 && past.length > 0 && (
+                  <View style={styles.sectionEmpty}>
+                    <Ionicons name="calendar-outline" size={40} color={colors.borderStrong} />
+                    <Text style={styles.emptyTitle}>No upcoming events</Text>
+                    <Text style={styles.emptySub}>Create a new event or scroll down for past ones.</Text>
+                  </View>
+                )}
+                {upcoming.map((e) => renderCard(e, false))}
+                {past.length > 0 && (
+                  <View style={styles.sectionHeader} testID="past-events-section">
+                    <Ionicons name="time-outline" size={16} color={colors.muted} />
+                    <Text style={styles.sectionTitle}>Past Events</Text>
+                    <View style={styles.sectionCountPill}>
+                      <Text style={styles.sectionCountText}>{past.length}</Text>
+                    </View>
+                  </View>
+                )}
+                {past.map((e) => renderCard(e, true))}
+              </>
+            );
+          })()}
           <View style={{ height: 32 }} />
         </ScrollView>
       )}
@@ -299,6 +335,30 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
   list: { padding: spacing.lg, gap: spacing.md },
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginTop: spacing.md, marginBottom: 4,
+  },
+  sectionTitle: { fontSize: 14, fontWeight: "700", color: colors.muted, letterSpacing: 0.3, textTransform: "uppercase" },
+  sectionCountPill: {
+    marginLeft: 4, paddingHorizontal: 8, paddingVertical: 1,
+    backgroundColor: colors.brandTertiary, borderRadius: radius.pill,
+  },
+  sectionCountText: { fontSize: 11, color: colors.brand, fontWeight: "700" },
+  sectionEmpty: {
+    alignItems: "center", gap: 4,
+    paddingVertical: spacing.lg,
+  },
+  endedChip: {
+    flexDirection: "row", alignSelf: "flex-start",
+    alignItems: "center", gap: 4,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 2,
+    marginTop: 4,
+  },
+  endedChipText: { fontSize: 11, color: colors.muted, fontWeight: "600" },
   card: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.card,

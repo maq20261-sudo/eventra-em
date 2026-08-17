@@ -91,6 +91,8 @@ export const api = {
     radius_km?: number;
     category?: string;
     search?: string;
+    include_past?: boolean;
+    only_past?: boolean;
   }) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
