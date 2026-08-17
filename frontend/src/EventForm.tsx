@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
+import LocationPicker from "@/src/LocationPicker";
 import * as ImagePicker from "expo-image-picker";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
@@ -62,6 +63,8 @@ export default function EventForm({ editId }: Props) {
   const [timeSlots, setTimeSlots] = useState<{ time: string; capacity: number }[]>([
     { time: "", capacity: 50 },
   ]);
+  // Modal state for the "drop-a-pin on map" picker.
+  const [pickerOpen, setPickerOpen] = useState(false);
 
 
   useEffect(() => {
@@ -349,6 +352,18 @@ export default function EventForm({ editId }: Props) {
                 label={locationName || "Event location"}
                 height={160}
               />
+              {/* "Adjust pin on map" — opens a full interactive map so the
+                  organizer can fine-tune the exact position after picking
+                  a place from search. */}
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                style={styles.pinAdjustBtn}
+                testID="adjust-pin-btn"
+              >
+                <Ionicons name="pin" size={16} color={colors.brand} />
+                <Text style={styles.pinAdjustText}>Adjust pin on map</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.borderStrong} />
+              </Pressable>
             </View>
           )}
 
@@ -504,6 +519,24 @@ export default function EventForm({ editId }: Props) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <LocationPicker
+        visible={pickerOpen}
+        initialLat={parseFloat(latitude) || 19.076}
+        initialLng={parseFloat(longitude) || 72.877}
+        initialLabel={locationName}
+        onCancel={() => setPickerOpen(false)}
+        onSelect={(loc) => {
+          setLatitude(String(loc.latitude));
+          setLongitude(String(loc.longitude));
+          // Only auto-fill the name if the field is empty — never clobber
+          // a place name the organizer already picked from Google search.
+          if (!locationName || locationName.length === 0) {
+            setLocationName(loc.label);
+          }
+          setPickerOpen(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -567,6 +600,17 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingVertical: 8, marginTop: 2,
   },
   gpsText: { color: colors.brand, fontSize: 13, fontWeight: "500" },
+  pinAdjustBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: 10,
+    marginTop: spacing.sm,
+  },
+  pinAdjustText: {
+    flex: 1, color: colors.onSurface, fontSize: 14, fontWeight: "500",
+  },
   locPicker: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary,
