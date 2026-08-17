@@ -1,0 +1,39 @@
+{
+  "summary": "Verified the Google Places search-first Location picker end-to-end. BACKEND: All 3 new proxy endpoints (POST /api/places/autocomplete, /details, /reverse) work correctly against live Google Places API. Autocomplete for 'phoenix marketcity mumbai' returns 5 valid suggestions (Bengaluru/Mumbai/Chennai/Pune/Kurla Phoenix Marketcity locations, each with place_id + description). Details returns numeric latitude/longitude + formatted_address + short displayName. Reverse-geocode returns 200 with either a valid address or graceful null (Geocoding API is enabled — real address is returned for lat=19.076,lng=72.8777 Mumbai). Auth is enforced on all three: unauthenticated requests return 403 (FastAPI HTTPBearer default; behavior functionally equivalent to 401, tests accept both). GOOGLE_MAPS_API_KEY is NEVER echoed in any response body (verified for autocomplete/details/reverse). Full pytest suite: 106/106 pass (0 failures) — up from previous 97 (added 9 new tests in /app/backend/tests/test_places_proxy.py, none of the pre-existing tests regressed). FRONTEND (mobile viewport 390x844, demo@organizer.com/password123 → Organizer role): /(organizer)/create renders the NEW LocationSearchField exactly as spec'd — (a) magnifying-glass icon + TextInput with placeholder 'Search for a place, area, or address…' and testID 'location-search', (b) 'Use my current location' Pressable with navigate-icon and testID 'loc-use-current'. Old 'Pick location on map' button + 'Location name' free-text field are BOTH GONE (count=0). Typing 'phoenix mark' → after ~300ms debounce a dropdown of 5 suggestions renders, each with testID matching 'loc-suggestion-<place_id>' (verified prefix 'loc-suggestion-ChIJ...'). Selecting the first suggestion fires POST /api/places/details (200), populates the input with the short displayName 'Phoenix Marketcity', and the EventMap preview iframe re-renders using the returned lat/lng. Edit-mode (/(organizer)/edit/<eventId>) hydrates the search field with the existing event.location_name (verified: value 'Test Room' loaded for event 7bb9fde4). NOTES: (1) 'Use my current location' full permission prompt / geolocation flow cannot be fully validated in headless Playwright — the button renders correctly, is tappable, and code review confirms it shows 'Getting location…' with ActivityIndicator while resolving. (2) Playwright's default .click() does NOT trigger RN-Web Pressable onPress for the suggestion rows — this is a known RN Web + Playwright interaction artifact (not a product bug); dispatching pointerdown+mouseup+click via JS reliably fires the handler. Real users on touch/mouse are unaffected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/places/autocomplete (unauth)", "issue": "Returns 403 instead of the more idiomatic 401 for missing/blank Authorization. Cause: FastAPI's default HTTPBearer(auto_error=True) raises 403 when the header is absent. Not a regression — same behavior across every other authed endpoint in server.py. Cosmetic only."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_places_proxy.py",
+    "/app/test_reports/pytest/iteration_14_full.xml"
+  ],
+  "action_items": [
+    "Optional (nit): make LocationSearchField.tsx robust when the user picks a suggestion very quickly after another blur — currently the useEffect on line 59 (`if (value.name && !focused) setQuery(value.name)`) will re-set the query text to the value.name that the parent hydrates. In practice this works because choose() writes the short name via setQuery + onChange, but keeping both sources of truth for the input value in sync is drift-prone; consider making the input `value.name` a fully controlled prop and dropping the local query mirror.",
+    "Optional: consider returning 401 (not 403) from the Places endpoints (and all authed endpoints) for missing Authorization to match REST conventions — trivial fix via a custom HTTPBearer subclass with auto_error=False.",
+    "Server.py is still ~2177 lines — carrying over the recurring code-review note from prior iterations to eventually split routes into per-domain modules."
+  ],
+  "critical_code_review_comments": [
+    "LocationSearchField uses a 300ms debounce (line 160) which meets the 'within ~500ms of pause' requirement in the spec — good.",
+    "GOOGLE_MAPS_API_KEY is only read on the server (server.py line 122) and always passed via header X-Goog-Api-Key — never included in response payloads. Verified explicitly by test TestNoApiKeyLeak.test_autocomplete_no_leak.",
+    "Session token rotation is correct: LocationSearchField.tsx line 195 mints a new sessionToken after every successful selection AND line 221 mints a new one on the clear (X) button — matches Google Places billing best practice.",
+    "Field-mask on Places Details (server.py line 905) is minimal: 'id,formattedAddress,displayName,location' — good cost control.",
+    "server.py is still 2177 lines (>700 target). Non-blocking, but persistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_places_proxy.py (NEW — 9 tests)"
+  ],
+  "success_rate": {"backend": "100% (106/106 including 9 new Places tests)", "frontend": "100% for all web-testable UX cases — new UI renders, old UI removed, autocomplete + details flow works, edit-mode hydration works. 'Use my current location' geolocation prompt not fully validated in headless Playwright but UI/button verified per spec."},
+  "seed_data_creation": "No new seed data. Reused existing organizer events (e.g. 7bb9fde4 'Test Room') to verify edit-mode location hydration.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend Places tests live at /app/backend/tests/test_places_proxy.py — safe to run standalone (`python -m pytest tests/test_places_proxy.py -v`). Screenshots for this iteration: /tmp/05_suggestions.png (autocomplete dropdown for 'phoenix mark'), /tmp/07_after_pick_v2.png (post-selection state — input shows 'Phoenix Marketcity', map preview visible), /tmp/13_edit_location.png (edit-mode showing 'Test Room' hydrated). If you need to reproduce autocomplete → details selection in Playwright, note that Playwright's `.click(force=True)` does NOT reliably fire RN-Web Pressable's onPress — dispatch a pointerdown+pointerup+click sequence via `el.evaluate(...)` instead (see this iteration's test script). Reverse-geocode endpoint is currently BACKED by the real Google Geocoding API for this project (returns real addresses, not nulls) — assumption of graceful null in spec is still supported by the code path."
+}

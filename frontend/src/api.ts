@@ -110,6 +110,18 @@ export const api = {
       `/events/${id}/booked-seats${timeSlot ? `?time_slot=${encodeURIComponent(timeSlot)}` : ""}`,
       { method: "GET" },
     ),
+
+  // ---- Google Places proxy ----
+  placesAutocomplete: (body: {
+    input: string;
+    session_token: string;
+    latitude?: number;
+    longitude?: number;
+  }) => request("/places/autocomplete", { method: "POST", body: JSON.stringify(body) }),
+  placeDetails: (body: { place_id: string; session_token: string }) =>
+    request("/places/details", { method: "POST", body: JSON.stringify(body) }),
+  reverseGeocode: (body: { latitude: number; longitude: number }) =>
+    request("/places/reverse", { method: "POST", body: JSON.stringify(body) }),
   myOrgEvents: () => request(`/organizer/events`, { method: "GET" }, true),
 
   // Bookings

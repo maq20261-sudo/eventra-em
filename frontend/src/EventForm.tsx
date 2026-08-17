@@ -8,14 +8,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import * as Location from "expo-location";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
-import LocationPicker from "@/src/LocationPicker";
 import * as ImagePicker from "expo-image-picker";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import DateTimeField from "@/src/DateTimeField";
+import LocationSearchField from "@/src/LocationSearchField";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
 const BOOKING_TYPES = [
@@ -63,7 +62,7 @@ export default function EventForm({ editId }: Props) {
   const [timeSlots, setTimeSlots] = useState<{ time: string; capacity: number }[]>([
     { time: "", capacity: 50 },
   ]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+
 
   useEffect(() => {
     if (!editId) return;
@@ -106,17 +105,6 @@ export default function EventForm({ editId }: Props) {
       }
     })();
   }, [editId]);
-
-  const useMyGPS = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const pos = await Location.getCurrentPositionAsync({});
-      setLatitude(String(pos.coords.latitude));
-      setLongitude(String(pos.coords.longitude));
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (e) { console.log(e); }
-  };
 
   const pickBanner = async () => {
     try {
@@ -338,38 +326,19 @@ export default function EventForm({ editId }: Props) {
           />
 
           <Label styles={styles}>Location</Label>
-          <Pressable
-            style={styles.locPicker}
-            onPress={() => setPickerOpen(true)}
-            testID="open-location-picker"
-          >
-            <View style={styles.locIcon}>
-              <Ionicons name="map" size={18} color={colors.brand} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.locPickerTitle} numberOfLines={1}>
-                {locationName || "Pick location on map"}
-              </Text>
-              <Text style={styles.locPickerSub}>
-                {latitude && longitude
-                  ? `${parseFloat(latitude).toFixed(4)}, ${parseFloat(longitude).toFixed(4)}`
-                  : "Tap to search or drop a pin"}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.borderStrong} />
-          </Pressable>
-          <Pressable onPress={useMyGPS} style={styles.gpsBtn} testID="use-my-gps-btn">
-            <Ionicons name="navigate" size={16} color={colors.brand} />
-            <Text style={styles.gpsText}>Or use my current location</Text>
-          </Pressable>
-
-          <TextInput
-            testID="location-input"
-            style={[styles.input, { marginTop: spacing.sm }]}
-            placeholder="Location name (e.g. Golden Gate Park)"
-            value={locationName}
-            onChangeText={setLocationName}
-            placeholderTextColor={colors.muted}
+          <LocationSearchField
+            testID="location-search"
+            value={{
+              name: locationName,
+              latitude: parseFloat(latitude) || null,
+              longitude: parseFloat(longitude) || null,
+            }}
+            onChange={(picked) => {
+              setLocationName(picked.name);
+              setLatitude(String(picked.latitude));
+              setLongitude(String(picked.longitude));
+            }}
+            autoUseCurrent={!editId}
           />
 
           {!isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude)) && (
@@ -535,24 +504,6 @@ export default function EventForm({ editId }: Props) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-
-      <LocationPicker
-        visible={pickerOpen}
-        initialLat={parseFloat(latitude) || 37.7749}
-        initialLng={parseFloat(longitude) || -122.4194}
-        initialLabel={locationName}
-        onCancel={() => setPickerOpen(false)}
-        onSelect={(loc) => {
-          setLatitude(String(loc.latitude));
-          setLongitude(String(loc.longitude));
-          // Only auto-fill location name if the field is empty — never clobber
-          // a name the organizer typed themselves.
-          if (!locationName || locationName.length === 0) {
-            setLocationName(loc.label);
-          }
-          setPickerOpen(false);
-        }}
-      />
     </SafeAreaView>
   );
 }

@@ -113,6 +113,28 @@ async def rate_limit_middleware(request, call_next):
 
 # ---------- Models ----------
 
+# ---------- Google Places proxy (for event location search) ----------
+# The Places API key never leaves the server. Frontend calls our proxy which
+# adds the header, forwards to Google Places API (New), and returns a minimal
+# stable contract. Session tokens + field masks keep per-selection cost low.
+import httpx as _httpx  # local alias so we don't touch other imports
+
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+_PLACES_BASE = "https://places.googleapis.com/v1"
+
+
+class PlacesAutocompleteBody(BaseModel):
+    input: str = Field(min_length=2, max_length=200)
+    session_token: str = Field(min_length=1, max_length=64)
+    # Optional user location for locationBias — improves relevance.
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
+
+class PlaceDetailsBody(BaseModel):
+    place_id: str = Field(min_length=1, max_length=300)
+    session_token: str = Field(min_length=1, max_length=64)
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -821,6 +843,120 @@ async def logout(user=Depends(get_current_user)):
     stolen ones sitting on a compromised device)."""
     await _bump_token_version(user["id"])
     return {"ok": True, "message": "Signed out on all devices"}
+
+# ---------- Google Places Proxy Routes ----------
+
+@api_router.post("/places/autocomplete")
+async def places_autocomplete(body: PlacesAutocompleteBody, user=Depends(get_current_user)):
+    """Proxy for Google Places Autocomplete (New). Returns a minimal list of
+    `{place_id, description}` items. Uses server-only key; caller must be
+    authenticated."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Location search is not configured on the server.")
+    payload: Dict[str, Any] = {
+        "input": body.input.strip(),
+        "sessionToken": body.session_token,
+    }
+    if body.latitude is not None and body.longitude is not None:
+        payload["locationBias"] = {"circle": {
+            "center": {"latitude": body.latitude, "longitude": body.longitude},
+            "radius": 50000.0,
+        }}
+    try:
+        async with _httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(
+                f"{_PLACES_BASE}/places:autocomplete",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                },
+                json=payload,
+            )
+    except _httpx.HTTPError as e:
+        log.warning("places_autocomplete upstream error: %s", e)
+        raise HTTPException(status_code=502, detail="Location search is unavailable right now.")
+    if r.status_code >= 400:
+        log.warning("places_autocomplete non-200: %s %s", r.status_code, r.text[:200])
+        raise HTTPException(status_code=502, detail="Location search is unavailable right now.")
+    data = r.json() or {}
+    suggestions = []
+    for x in data.get("suggestions", []) or []:
+        p = x.get("placePrediction") or {}
+        pid = p.get("placeId")
+        text = (p.get("text") or {}).get("text") or ""
+        if pid and text:
+            suggestions.append({"place_id": pid, "description": text})
+    return {"suggestions": suggestions}
+
+
+@api_router.post("/places/details")
+async def places_details(body: PlaceDetailsBody, user=Depends(get_current_user)):
+    """Proxy for Google Places Details (New). Returns
+    `{place_id, formatted_address, latitude, longitude}`.
+    Requests only the fields needed by Create Event to minimize cost."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Location search is not configured on the server.")
+    try:
+        async with _httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(
+                f"{_PLACES_BASE}/places/{body.place_id}",
+                headers={
+                    "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                    "X-Goog-FieldMask": "id,formattedAddress,displayName,location",
+                },
+                params={"sessionToken": body.session_token},
+            )
+    except _httpx.HTTPError as e:
+        log.warning("places_details upstream error: %s", e)
+        raise HTTPException(status_code=502, detail="Location details are unavailable right now.")
+    if r.status_code >= 400:
+        log.warning("places_details non-200: %s %s", r.status_code, r.text[:200])
+        raise HTTPException(status_code=502, detail="Location details are unavailable right now.")
+    data = r.json() or {}
+    loc = data.get("location") or {}
+    display = (data.get("displayName") or {}).get("text")
+    return {
+        "place_id": data.get("id") or body.place_id,
+        "formatted_address": data.get("formattedAddress"),
+        "name": display,  # short name (e.g. "Phoenix Marketcity")
+        "latitude": loc.get("latitude"),
+        "longitude": loc.get("longitude"),
+    }
+
+
+@api_router.post("/places/reverse")
+async def places_reverse(body: Dict[str, Any], user=Depends(get_current_user)):
+    """Reverse-geocode (lat,lng) → formatted address for the "use my current
+    location" default. Uses Google Geocoding API. Returns
+    `{formatted_address, name}` or graceful fallback."""
+    if not GOOGLE_MAPS_API_KEY:
+        return {"formatted_address": None, "name": None}
+    try:
+        lat = float(body.get("latitude"))
+        lng = float(body.get("longitude"))
+    except Exception:
+        raise HTTPException(status_code=422, detail="latitude and longitude are required")
+    try:
+        async with _httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(
+                "https://maps.googleapis.com/maps/api/geocode/json",
+                params={"latlng": f"{lat},{lng}", "key": GOOGLE_MAPS_API_KEY},
+            )
+    except _httpx.HTTPError:
+        return {"formatted_address": None, "name": None}
+    if r.status_code >= 400:
+        return {"formatted_address": None, "name": None}
+    data = r.json() or {}
+    results = data.get("results") or []
+    if not results:
+        return {"formatted_address": None, "name": None}
+    top = results[0]
+    return {
+        "formatted_address": top.get("formatted_address"),
+        # A short name — first component (e.g. building/POI).
+        "name": (top.get("address_components") or [{}])[0].get("long_name"),
+    }
+
 
 # ---------- Event Helpers ----------
 
