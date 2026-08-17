@@ -26,16 +26,24 @@ export default function EventDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // CRITICAL: reset event state when id changes so we don't briefly
+    // render the PREVIOUS event's data (which caused Reserved Seating
+    // events to flash as "General Admission" when navigating between
+    // events with different booking types).
+    let cancelled = false;
+    setEvent(null);
+    setLoading(true);
     (async () => {
       try {
         const e = await api.getEvent(String(id));
-        setEvent(e);
+        if (!cancelled) setEvent(e);
       } catch (err) {
         console.log("Event detail error", err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [id]);
 
   if (loading) {

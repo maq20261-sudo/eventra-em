@@ -41,6 +41,10 @@ export default function TicketScreen() {
   const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
+    // Reset while fetching so we don't flash the previous ticket's data
+    // (source of "wrong booking type" symptom when navigating tickets).
+    setBooking(null);
+    setLoading(true);
     try {
       const list = await api.myBookings();
       const found = list.find((b: any) => b.id === String(id));

@@ -42,27 +42,45 @@ export default function Booking() {
   const [gatewayConfigured, setGatewayConfigured] = useState(true);
 
   useEffect(() => {
+    // Reset event & booked state when the id changes so we don't
+    // briefly render the PREVIOUS event's booking_type (which caused
+    // Reserved Seating events to flash as "General Admission" when
+    // navigating from one booking screen to another).
+    let cancelled = false;
+    setEvent(null);
+    setLoading(true);
+    setBooked({ booked_seats: [], booked_slots: [], total_general_booked: 0 });
+    setSelectedSeats([]);
+    setNumSeats(1);
+    setSlot(null);
+    setSlotSeats(1);
+    setError(null);
     (async () => {
       try {
         const [e, b] = await Promise.all([api.getEvent(String(id)), api.bookedSeats(String(id))]);
+        if (cancelled) return;
         setEvent(e);
         setBooked(b);
         // Determine payment gateway availability so we can hide the online option gracefully
         try {
           const cfg = await api.paymentConfig();
+          if (cancelled) return;
           const configured = !!cfg?.configured;
           setGatewayConfigured(configured);
           if (!configured) setPaymentMethod("venue");
         } catch {
-          setGatewayConfigured(false);
-          setPaymentMethod("venue");
+          if (!cancelled) {
+            setGatewayConfigured(false);
+            setPaymentMethod("venue");
+          }
         }
       } catch (err) {
         console.log("Booking load error", err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [id]);
 
   // Whether this event is a seat_map with time slots (Task 3).

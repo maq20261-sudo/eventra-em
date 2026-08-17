@@ -76,9 +76,33 @@ export default function EventForm({ editId }: Props) {
 
   useEffect(() => {
     if (!editId) return;
+    // CRITICAL: reset ALL fields BEFORE fetching so state from a
+    // previously-open event doesn't bleed into this one. Otherwise
+    // navigating Reserved → General → back to Reserved could leave the
+    // form showing "General Admission" (previous editId's state) until
+    // the async fetch completed. Also handles cases where the new event
+    // is missing fields (e.g., seat_rows) that the old event had.
+    let cancelled = false;
+    setInitialLoading(true);
+    setTitle("");
+    setDescription("");
+    setCategory("Music");
+    setImageUrl(DEFAULT_IMAGES[0]);
+    setStartAt(null);
+    setEndAt(null);
+    setLocationName("");
+    setLatitude("37.7749");
+    setLongitude("-122.4194");
+    setPrice("0");
+    setBookingType("general");
+    setSeatRows("6");
+    setSeatCols("8");
+    setTotalSeats("100");
+    setTimeSlots([{ time: "", capacity: 50 }]);
     (async () => {
       try {
         const e = await api.getEvent(editId);
+        if (cancelled) return;
         setTitle(e.title);
         setDescription(e.description);
         setCategory(e.category);
@@ -111,9 +135,10 @@ export default function EventForm({ editId }: Props) {
       } catch (err) {
         console.log("Fetch edit error", err);
       } finally {
-        setInitialLoading(false);
+        if (!cancelled) setInitialLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [editId]);
 
   const pickBanner = async () => {
