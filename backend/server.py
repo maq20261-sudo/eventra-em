@@ -6,6 +6,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
 import logging
+
+log = logging.getLogger("gatherspace")
 import math
 import hmac
 import hashlib
@@ -666,26 +668,57 @@ async def firebase_verify(body: FirebaseVerifyBody):
     email = body.email.strip().lower()
     name = body.name.strip()
 
-    # Refuse duplicates FOR THIS ROLE only. The same phone/email may be
-    # registered as both attendee and organizer — those are two separate
-    # accounts. But re-registering the same (email OR mobile, role) triple
-    # would create a genuine duplicate.
-    existing = await db.users.find_one({
-        "$and": [
-            {"role": body.role},
-            {"$or": [
-                {"firebase_uid": firebase_uid},
-                {"mobile": mobile_stored},
-                {"email": email},
-            ]},
-        ]
+    # Duplicate detection. The same (phone/email) may be registered as both
+    # attendee AND organizer — two independent accounts. What we truly want
+    # to reject is a NEW signup that collides with an existing account
+    # SHARING THE SAME ROLE.
+    #
+    # If the collision is on the same `firebase_uid` + `role` + `email`
+    # triple, we treat it as an idempotent retry (network flake, user
+    # tapped "Verify" twice, OTA screen re-mount) and simply return a fresh
+    # token for the existing user rather than erroring out.
+    existing_same_role = await db.users.find_one({
+        "role": body.role,
+        "$or": [
+            {"firebase_uid": firebase_uid},
+            {"mobile": mobile_stored},
+            {"email": email},
+        ],
     })
-    if existing:
-        # We deliberately don't leak WHICH field collided — otherwise this
-        # doubles as an account-enumeration oracle.
+    if existing_same_role:
+        # Retry case — exact same account. Log them back in.
+        if (
+            existing_same_role.get("firebase_uid") == firebase_uid
+            and existing_same_role.get("email") == email
+            and existing_same_role.get("role") == body.role
+        ):
+            log.info(
+                "firebase-verify: idempotent retry for user=%s role=%s",
+                existing_same_role["id"], body.role,
+            )
+            token = _mint_user_token(existing_same_role)
+            return TokenResponse(access_token=token, user=_user_out(existing_same_role))
+
+        # Genuine same-role duplicate — some detail differs. Log server-side
+        # (with the specific collision field) but return a neutral message
+        # so we don't leak account enumeration signals.
+        collided = (
+            "firebase_uid" if existing_same_role.get("firebase_uid") == firebase_uid
+            else "mobile" if existing_same_role.get("mobile") == mobile_stored
+            else "email" if existing_same_role.get("email") == email
+            else "unknown"
+        )
+        role_label = "Attendee" if body.role == "consumer" else "Organizer"
+        log.warning(
+            "firebase-verify: 409 same-role duplicate role=%s collided_on=%s existing_user=%s",
+            body.role, collided, existing_same_role["id"],
+        )
         raise HTTPException(
             status_code=409,
-            detail="An account with this role is already registered on this phone/email. Please sign in instead.",
+            detail=(
+                f"You already have an {role_label} account with these details. "
+                "Please sign in instead."
+            ),
         )
 
     now_iso = datetime.now(timezone.utc).isoformat()

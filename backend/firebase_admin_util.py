@@ -44,6 +44,12 @@ class FirebaseAuthError(Exception):
 
 
 def is_enabled() -> bool:
+    # Dev bypass: when FIREBASE_DEV_BYPASS=1, the module is considered enabled
+    # and verify_id_token() decodes a JSON payload from the "token" so we can
+    # deterministically exercise the auth flows in local tests without needing
+    # a real Firebase project. NEVER set this in production.
+    if os.environ.get("FIREBASE_DEV_BYPASS") == "1":
+        return True
     return _ENABLED and _APP is not None
 
 
@@ -51,6 +57,17 @@ def verify_id_token(id_token: str) -> dict:
     """Verify a Firebase ID token and return the decoded claims dict.
     Raises FirebaseAuthError on any failure (bad signature, expired, revoked,
     or Firebase Admin not initialised)."""
+    # Dev bypass — token is a plain JSON `{"uid":..., "phone_number":...}`.
+    if os.environ.get("FIREBASE_DEV_BYPASS") == "1":
+        import json
+        try:
+            payload = json.loads(id_token)
+        except Exception as e:
+            raise FirebaseAuthError(f"[DEV_BYPASS] invalid mock token: {e}")
+        if "uid" not in payload or "phone_number" not in payload:
+            raise FirebaseAuthError("[DEV_BYPASS] token missing uid/phone_number")
+        payload.setdefault("user_id", payload["uid"])
+        return payload
     if not is_enabled():
         raise FirebaseAuthError("Firebase Admin not configured on server")
     try:
