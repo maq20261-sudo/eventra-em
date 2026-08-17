@@ -12,6 +12,7 @@ import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { eventDateRange } from "@/src/utils/eventDate";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -119,7 +120,7 @@ export default function TicketScreen() {
   const isPaidOnline = booking.payment_status === "paid";
   const isRefundPending = booking.payment_status === "refund_pending";
   const isRefundFailed = booking.payment_status === "refund_failed";
-  const hrsLeft = hoursUntil(e.date);
+  const hrsLeft = hoursUntil(e.start_date || e.date);
   const canCancel =
     !isCancelled &&
     !booking.checked_in &&
@@ -167,7 +168,7 @@ export default function TicketScreen() {
 
             <View style={styles.metaRow}>
               <Ionicons name="calendar-outline" size={14} color={colors.muted} />
-              <Text style={styles.metaText}>{fmtDate(e.date)} · {fmtTime(e.date)}</Text>
+              <Text style={styles.metaText}>{eventDateRange(e)}</Text>
             </View>
             <View style={styles.metaRow}>
               <Ionicons name="location-outline" size={14} color={colors.muted} />

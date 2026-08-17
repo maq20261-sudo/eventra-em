@@ -57,7 +57,7 @@ export default function MyBookings() {
   const filtered = bookings.filter((b) => {
     if (!b.event) return false;
     if (b.status === "cancelled") return tab === "completed";
-    const isPast = new Date(b.event.date) < now;
+    const isPast = new Date(b.event.end_date || b.event.date) < now;
     return tab === "upcoming" ? !isPast : isPast;
   });
 
@@ -113,7 +113,7 @@ export default function MyBookings() {
                   <Text style={styles.eventTitle} numberOfLines={2}>{b.event?.title}</Text>
                   <View style={styles.metaRow}>
                     <Ionicons name="calendar-outline" size={13} color={colors.muted} />
-                    <Text style={styles.metaText}>{b.event ? fmtDate(b.event.date) : ""}</Text>
+                    <Text style={styles.metaText}>{b.event ? fmtDate(b.event.start_date || b.event.date) : ""}</Text>
                   </View>
                   <View style={styles.metaRow}>
                     <Ionicons name="location-outline" size={13} color={colors.muted} />

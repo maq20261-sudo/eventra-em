@@ -13,6 +13,7 @@ import { useAuth } from "@/src/AuthContext";
 import EventMap from "@/src/EventMap";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { eventDateRange } from "@/src/utils/eventDate";
 
 export default function EventDetail() {
   const { colors } = useTheme();
@@ -52,9 +53,19 @@ export default function EventDetail() {
     );
   }
 
-  const date = new Date(event.date);
-  const dateStr = date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const timeStr = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const startDate = new Date(event.start_date || event.date);
+  const dateStr = startDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  // Full range e.g. "7:00 PM – 10:00 PM" (same day) or start–end date (multi-day)
+  const rangeStr = eventDateRange(event);
+  const endDate = event.end_date ? new Date(event.end_date) : null;
+  const sameDay = endDate ? (
+    startDate.getFullYear() === endDate.getFullYear() &&
+    startDate.getMonth() === endDate.getMonth() &&
+    startDate.getDate() === endDate.getDate()
+  ) : true;
+  const timeStr = sameDay && endDate
+    ? `${startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${endDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
+    : startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   const isOwner = user?.role === "organizer" && user?.id === event.organizer_id;
 
@@ -95,8 +106,8 @@ export default function EventDetail() {
               <Ionicons name="calendar" size={20} color={colors.brand} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.dateTitle}>{dateStr}</Text>
-              <Text style={styles.dateSub}>{timeStr}</Text>
+              <Text style={styles.dateTitle}>{sameDay ? dateStr : rangeStr}</Text>
+              <Text style={styles.dateSub}>{sameDay ? timeStr : `Ends ${endDate?.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</Text>
             </View>
           </View>
 

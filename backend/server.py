@@ -214,7 +214,11 @@ class EventCreate(BaseModel):
     description: str = Field(min_length=1, max_length=5000)
     category: str = Field(min_length=1, max_length=64)  # Music, Art, Tech, Food, Sports, Other
     image_url: Optional[str] = None
-    date: str  # ISO
+    # `date` is legacy — kept optional for back-compat. Prefer start_date/end_date.
+    # If only `date` is provided, we set start_date=date and end_date=start_date+1d.
+    date: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     location_name: str = Field(min_length=1, max_length=200)
     latitude: float = Field(ge=-90.0, le=90.0)
     longitude: float = Field(ge=-180.0, le=180.0)
@@ -225,14 +229,40 @@ class EventCreate(BaseModel):
     seat_cols: Optional[int] = Field(default=None, ge=1, le=100)
     # For general
     total_seats: Optional[int] = Field(default=None, ge=1, le=1_000_000)
-    # For time_slot — accepts either List[str] (legacy) or List[{"time":str, "capacity":int}] (new).
-    # Normalized to List[str] + slot_capacities dict in _normalize_time_slots below.
+    # For time_slot AND (optionally) seat_map — accepts either List[str] (legacy)
+    # or List[{"time":str, "capacity":int}] (new). Normalized to List[str] +
+    # slot_capacities dict in _normalize_time_slots below.
     time_slots: Optional[List[Any]] = None
     slot_capacity: Optional[int] = Field(default=1, ge=1, le=100_000)  # DEFAULT seats per slot (legacy fallback)
 
     @model_validator(mode="after")
-    def _validate_image(self):
+    def _validate_dates_and_image(self):
         self.image_url = _validate_image_url(self.image_url)
+        # Normalize date fields — accept `date` (legacy) or start_date/end_date.
+        if not self.start_date and self.date:
+            self.start_date = self.date
+        if not self.start_date:
+            raise ValueError("start_date (or legacy `date`) is required")
+        if not self.end_date:
+            # Default end = start + 1 day (per product decision)
+            try:
+                start = datetime.fromisoformat(self.start_date.replace("Z", "+00:00"))
+                self.end_date = (start + timedelta(days=1)).isoformat()
+            except Exception as e:
+                raise ValueError(f"Invalid start_date: {e}")
+        else:
+            # Ensure end > start
+            try:
+                start = datetime.fromisoformat(self.start_date.replace("Z", "+00:00"))
+                end = datetime.fromisoformat(self.end_date.replace("Z", "+00:00"))
+                if end <= start:
+                    raise ValueError("end_date must be after start_date")
+            except ValueError:
+                raise
+            except Exception as e:
+                raise ValueError(f"Invalid date format: {e}")
+        # Mirror start_date -> date for back-compat.
+        self.date = self.start_date
         return self
 
 class EventUpdate(BaseModel):
@@ -240,7 +270,9 @@ class EventUpdate(BaseModel):
     description: Optional[str] = Field(default=None, min_length=1, max_length=5000)
     category: Optional[str] = Field(default=None, min_length=1, max_length=64)
     image_url: Optional[str] = None
-    date: Optional[str] = None
+    date: Optional[str] = None  # legacy alias for start_date
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     location_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     latitude: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
     longitude: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
@@ -260,7 +292,9 @@ class EventOut(BaseModel):
     description: str
     category: str
     image_url: Optional[str] = None
-    date: str
+    date: str  # kept for back-compat; mirrors start_date
+    start_date: str
+    end_date: str
     location_name: str
     latitude: float
     longitude: float
@@ -389,7 +423,9 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
         "description": e.get("description", ""),
         "category": e.get("category", "Other"),
         "image_url": e.get("image_url"),
-        "date": e["date"],
+        "date": e.get("start_date") or e["date"],
+        "start_date": e.get("start_date") or e["date"],
+        "end_date": e.get("end_date") or e["date"],
         "location_name": e["location_name"],
         "latitude": e["latitude"],
         "longitude": e["longitude"],
@@ -792,7 +828,8 @@ def _normalize_time_slots(raw: Any, default_capacity: int) -> tuple:
 async def create_event(body: EventCreate, user=Depends(require_role("organizer"))):
     event_id = str(uuid.uuid4())
     doc = body.model_dump()
-    # Normalize time_slots so we store labels + capacities separately.
+    # Normalize time_slots — now supported for BOTH time_slot AND seat_map
+    # events (seat_map + slots = same grid, different availability per slot).
     if doc.get("booking_type") == "time_slot":
         default_cap = int(doc.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
         labels, caps = _normalize_time_slots(doc.get("time_slots"), default_cap)
@@ -800,8 +837,13 @@ async def create_event(body: EventCreate, user=Depends(require_role("organizer")
             raise HTTPException(status_code=400, detail="At least one time slot is required")
         doc["time_slots"] = labels
         doc["slot_capacities"] = caps
-        # Keep `slot_capacity` for legacy fallback but reflect the highest.
         doc["slot_capacity"] = max(caps.values()) if caps else default_cap
+    elif doc.get("booking_type") == "seat_map" and doc.get("time_slots"):
+        # For seat_map, slot capacity = rows*cols (per-slot capacity is fixed
+        # by the grid). We just need labels; capacities are computed on read.
+        labels, _ = _normalize_time_slots(doc.get("time_slots"), 1)
+        doc["time_slots"] = labels if labels else None
+        doc["slot_capacities"] = None  # unused for seat_map
     else:
         doc["time_slots"] = None
         doc["slot_capacities"] = None
@@ -856,15 +898,38 @@ async def list_events(
     return results
 
 async def _compute_slots_info(e: dict) -> Optional[List[Dict[str, Any]]]:
-    """For time_slot events, returns per-slot availability so the client can
-    show "N seats left" and disable sold-out slots."""
-    if e.get("booking_type") != "time_slot" or not e.get("time_slots"):
+    """Returns per-slot availability so the client can show 'N seats left'
+    and disable sold-out slots. Applies to time_slot events AND seat_map
+    events that also have time_slots configured."""
+    bt = e.get("booking_type")
+    if not e.get("time_slots") or bt not in ("time_slot", "seat_map"):
         return None
+
+    if bt == "seat_map":
+        # For seat_map + slots, capacity = rows*cols; booked = count of seats
+        # taken in each slot.
+        grid_cap = int((e.get("seat_rows") or 0) * (e.get("seat_cols") or 0))
+        cursor = db.bookings.aggregate([
+            {"$match": {"event_id": e["id"], "status": {"$in": ["confirmed", "checked_in"]}}},
+            {"$group": {"_id": "$time_slot", "n": {"$sum": {"$size": {"$ifNull": ["$seats", []]}}}}},
+        ])
+        counts = {row["_id"]: row["n"] async for row in cursor}
+        out = []
+        for slot in e["time_slots"]:
+            booked = int(counts.get(slot, 0))
+            remaining = max(0, grid_cap - booked)
+            out.append({
+                "time": slot,
+                "capacity": grid_cap,
+                "booked": booked,
+                "remaining": remaining,
+                "sold_out": remaining <= 0,
+            })
+        return out
+
+    # time_slot branch (unchanged)
     fallback_cap = int(e.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
     slot_caps: Dict[str, int] = e.get("slot_capacities") or {}
-    # Count confirmed / checked-in bookings grouped by slot, summing num_seats
-    # so that group time-slot bookings (>1 seat per booking) are counted
-    # correctly.
     cursor = db.bookings.aggregate([
         {"$match": {"event_id": e["id"], "status": {"$in": ["confirmed", "checked_in"]}}},
         {"$group": {"_id": "$time_slot", "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
@@ -902,9 +967,35 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
-    # If organizer is updating time_slots on a time_slot event, normalize them
-    # into labels + capacities. This lets them add slots or adjust per-slot
-    # capacity later.
+    # Normalize date fields: `date` is legacy alias for start_date; if
+    # start_date changes, mirror into `date` for back-compat.
+    if "date" in update_data and "start_date" not in update_data:
+        update_data["start_date"] = update_data["date"]
+    if "start_date" in update_data:
+        update_data["date"] = update_data["start_date"]
+        # If end_date not provided but start_date changed and existing
+        # end_date is now stale (before start), default end = start + 1 day.
+        try:
+            new_start = datetime.fromisoformat(update_data["start_date"].replace("Z", "+00:00"))
+            existing_end_raw = update_data.get("end_date") or e.get("end_date")
+            existing_end = datetime.fromisoformat(existing_end_raw.replace("Z", "+00:00")) if existing_end_raw else None
+            if not existing_end or existing_end <= new_start:
+                update_data["end_date"] = (new_start + timedelta(days=1)).isoformat()
+        except Exception:
+            pass
+    if "end_date" in update_data and "start_date" not in update_data:
+        # Verify end > current start.
+        try:
+            cur_start = datetime.fromisoformat((e.get("start_date") or e["date"]).replace("Z", "+00:00"))
+            new_end = datetime.fromisoformat(update_data["end_date"].replace("Z", "+00:00"))
+            if new_end <= cur_start:
+                raise HTTPException(status_code=400, detail="end_date must be after start_date")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    # If organizer is updating time_slots, normalize them into labels +
+    # capacities. Supported for both time_slot and seat_map events.
     if "time_slots" in update_data and e.get("booking_type") == "time_slot":
         default_cap = int(update_data.get("slot_capacity") or e.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
         labels, caps = _normalize_time_slots(update_data["time_slots"], default_cap)
@@ -913,8 +1004,11 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
         update_data["time_slots"] = labels
         update_data["slot_capacities"] = caps
         update_data["slot_capacity"] = max(caps.values()) if caps else default_cap
+    elif "time_slots" in update_data and e.get("booking_type") == "seat_map":
+        labels, _ = _normalize_time_slots(update_data["time_slots"], 1)
+        update_data["time_slots"] = labels if labels else None
+        update_data["slot_capacities"] = None
     elif "time_slots" in update_data:
-        # Non-time_slot events can't have time_slots.
         update_data.pop("time_slots", None)
     if update_data:
         await db.events.update_one({"id": event_id}, {"$set": update_data})
@@ -934,11 +1028,12 @@ async def delete_event(event_id: str, user=Depends(require_role("organizer"))):
     return {"ok": True}
 
 async def _reconcile_event_availability(event_id: str) -> dict:
-    """Rebuild `booked_seats`, `booked_slots`, and `booked_count` on the event
-    doc based on the actual bookings collection — the source of truth. This
-    self-heals any drift caused by stale data or aborted rollbacks so the
-    atomic booking guard is always consistent with the seat-availability view.
-    Returns the reconciled event doc (or None if missing).
+    """Rebuild `booked_seats`, `booked_slots`, `seats_by_slot`, and
+    `booked_count` on the event doc based on the actual bookings collection
+    — the source of truth. This self-heals any drift caused by stale data or
+    aborted rollbacks so the atomic booking guard is always consistent with
+    the seat-availability view. Returns the reconciled event doc (or None
+    if missing).
     """
     bookings = await db.bookings.find(
         {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}},
@@ -947,13 +1042,22 @@ async def _reconcile_event_availability(event_id: str) -> dict:
     booked_seats: list = []
     booked_slots: list = []
     booked_count = 0
+    # For seat_map + slots events: {slot_label: [seat_labels]}. For
+    # slotless seat_map events the empty-string key holds all seats.
+    seats_by_slot: dict = {}
     for b in bookings:
-        if b.get("seats"):
-            booked_seats.extend(b["seats"])
-            booked_count += len(b["seats"])
-        elif b.get("time_slot"):
-            # Group time-slot bookings support num_seats > 1 (defaults to 1).
-            booked_slots.append(b["time_slot"])
+        seats = b.get("seats") or []
+        slot = b.get("time_slot")
+        if seats:
+            booked_seats.extend(seats)
+            booked_count += len(seats)
+            key = slot or ""
+            seats_by_slot.setdefault(key, []).extend(seats)
+            if slot:
+                booked_slots.append(slot)
+        elif slot:
+            # time_slot booking without seats — supports num_seats>1.
+            booked_slots.append(slot)
             booked_count += int(b.get("num_seats") or 1)
         elif b.get("num_seats"):
             booked_count += int(b["num_seats"] or 0)
@@ -962,6 +1066,7 @@ async def _reconcile_event_availability(event_id: str) -> dict:
         {"$set": {
             "booked_seats": booked_seats,
             "booked_slots": booked_slots,
+            "seats_by_slot": seats_by_slot,
             "booked_count": booked_count,
         }},
         return_document=True,
@@ -969,25 +1074,31 @@ async def _reconcile_event_availability(event_id: str) -> dict:
 
 
 @api_router.get("/events/{event_id}/booked-seats")
-async def get_booked_seats(event_id: str):
+async def get_booked_seats(event_id: str, time_slot: Optional[str] = None):
     # Self-heal on read so the frontend seat map and the atomic booking
     # guard always see the same source of truth.
-    await _reconcile_event_availability(event_id)
-    bookings = await db.bookings.find({"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}, {"_id": 0}).to_list(1000)
+    e = await _reconcile_event_availability(event_id)
+    if e is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    query: dict = {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}
+    if time_slot:
+        query["time_slot"] = time_slot
+    bookings = await db.bookings.find(query, {"_id": 0}).to_list(1000)
     booked_seats = []
     booked_slots = []
     total_general = 0
     for b in bookings:
         if b.get("seats"):
             booked_seats.extend(b["seats"])
-        if b.get("time_slot"):
+        if b.get("time_slot") and not b.get("seats"):
             booked_slots.append(b["time_slot"])
-        if b.get("num_seats"):
+        if b.get("num_seats") and not b.get("seats"):
             total_general += b["num_seats"]
     return {
         "booked_seats": booked_seats,
         "booked_slots": booked_slots,
         "total_general_booked": total_general,
+        "seats_by_slot": (e.get("seats_by_slot") if not time_slot else None),
     }
 
 @api_router.get("/organizer/events", response_model=List[EventOut])
@@ -1018,6 +1129,34 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         if booking_type == "seat_map":
             if not body.seats:
                 raise HTTPException(status_code=400, detail="Please select seats")
+            has_slots = bool(event.get("time_slots"))
+            if has_slots:
+                if not body.time_slot:
+                    raise HTTPException(status_code=400, detail="Please pick a time slot")
+                if body.time_slot not in (event.get("time_slots") or []):
+                    raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
+                # Check slot-specific booked seats.
+                seats_by_slot = event.get("seats_by_slot") or {}
+                already = set(seats_by_slot.get(body.time_slot, []))
+                conflict = [s for s in body.seats if s in already]
+                if conflict:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Seat(s) already booked for this slot: {', '.join(conflict)}",
+                    )
+                price = event["price"] * len(body.seats)
+                units = len(body.seats)
+                slot_key = f"seats_by_slot.{body.time_slot}"
+                cond = {
+                    "id": body.event_id,
+                    f"seats_by_slot.{body.time_slot}": {"$not": {"$elemMatch": {"$in": body.seats}}},
+                }
+                upd = {
+                    "$inc": {"booked_count": units},
+                    "$push": {slot_key: {"$each": body.seats}},
+                }
+                return price, units, await db.events.find_one_and_update(cond, upd)
+            # Slotless seat_map (legacy): booked_seats is a flat list.
             price = event["price"] * len(body.seats)
             units = len(body.seats)
             cond = {
@@ -1134,6 +1273,8 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         rollback: Dict[str, Any] = {"$inc": {"booked_count": -num_units}}
         if booking_type == "seat_map":
             rollback["$pullAll"] = {"booked_seats": body.seats}
+            if body.time_slot:
+                rollback["$pull"] = {f"seats_by_slot.{body.time_slot}": {"$in": body.seats}}
         elif booking_type == "time_slot":
             rollback["$pull"] = {"booked_slots": body.time_slot}
         await db.events.update_one({"id": body.event_id}, rollback)
@@ -1199,19 +1340,26 @@ async def _release_booking_inventory(booking: dict) -> None:
     cancellation makes room for other users to book."""
     event_id = booking["event_id"]
     if booking.get("seats"):
+        # Remove from the flat booked_seats list (slotless legacy path).
         await db.events.update_one(
             {"id": event_id},
             {"$pullAll": {"booked_seats": booking["seats"]}},
         )
+        # Also remove from the slot-scoped map when the booking carried a slot.
+        if booking.get("time_slot"):
+            await db.events.update_one(
+                {"id": event_id},
+                {"$pull": {f"seats_by_slot.{booking['time_slot']}": {"$in": booking["seats"]}}},
+            )
     if booking.get("num_seats"):
         await db.events.update_one(
             {"id": event_id},
             {"$inc": {"booked_count": -int(booking["num_seats"])}},
         )
-    if booking.get("time_slot"):
-        # Some events have multi-user slots (many can book the same slot). We
-        # only remove the slot from booked_slots if no other CONFIRMED booking
-        # is still holding it — otherwise other users lose their reservation.
+    if booking.get("time_slot") and not booking.get("seats"):
+        # Same multi-user slot logic as before (only for time_slot bookings
+        # that don't carry seats — a seat_map+slot booking should NOT touch
+        # booked_slots since we track availability per-seat there).
         slot = booking["time_slot"]
         still_held = await db.bookings.count_documents({
             "event_id": event_id,
@@ -1292,7 +1440,7 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
     if not event:
         raise _cancellation_error("Event not found", code=404)
     try:
-        event_start = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
+        event_start = datetime.fromisoformat((event.get("start_date") or event["date"]).replace("Z", "+00:00"))
         if event_start.tzinfo is None:
             event_start = event_start.replace(tzinfo=timezone.utc)
     except Exception:
@@ -1755,7 +1903,7 @@ async def organizer_analytics(user=Depends(require_role("organizer"))):
             "title": e["title"],
             "revenue": ev_revenue,
             "tickets": ev_tickets,
-            "date": e["date"],
+            "date": e.get("start_date") or e["date"],
         })
 
     # Category breakdown

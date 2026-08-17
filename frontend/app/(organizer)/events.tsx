@@ -158,7 +158,7 @@ export default function OrganizerEvents() {
                   <View style={styles.body}>
                     <View style={styles.rowTop}>
                       <View style={styles.catBadge}><Text style={styles.catText}>{e.category}</Text></View>
-                      <Text style={styles.date}>{fmt(e.date)}</Text>
+                      <Text style={styles.date}>{fmt(e.start_date || e.date)}</Text>
                     </View>
                     <Text style={styles.eventTitle} numberOfLines={1}>{e.title}</Text>
                     <View style={styles.metaRow}>

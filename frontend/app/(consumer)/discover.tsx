@@ -476,7 +476,7 @@ export default function Discover() {
                       <Text style={styles.featuredTitle} numberOfLines={2}>{e.title}</Text>
                       <View style={styles.featuredMetaRow}>
                         <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.85)" />
-                        <Text style={styles.featuredMetaText}>{formatDate(e.date)}</Text>
+                        <Text style={styles.featuredMetaText}>{formatDate(e.start_date || e.date)}</Text>
                         <View style={styles.featuredMetaDot} />
                         <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
                         <Text style={styles.featuredMetaText} numberOfLines={1}>
@@ -533,7 +533,7 @@ export default function Discover() {
                 <Text style={styles.cardTitle} numberOfLines={2}>{e.title}</Text>
                 <View style={styles.metaRow}>
                   <Ionicons name="calendar-outline" size={14} color={colors.muted} />
-                  <Text style={styles.metaText}>{formatDate(e.date)} · {formatTime(e.date)}</Text>
+                  <Text style={styles.metaText}>{formatDate(e.start_date || e.date)} · {formatTime(e.start_date || e.date)}</Text>
                 </View>
                 <View style={styles.metaRow}>
                   <Ionicons name="location-outline" size={14} color={colors.muted} />

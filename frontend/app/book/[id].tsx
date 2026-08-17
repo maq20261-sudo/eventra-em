@@ -61,6 +61,25 @@ export default function Booking() {
     })();
   }, [id]);
 
+  // Whether this event is a seat_map with time slots (Task 3).
+  const isSeatMapWithSlots = useMemo(
+    () => !!event && event.booking_type === "seat_map" && Array.isArray(event.time_slots) && event.time_slots.length > 0,
+    [event],
+  );
+
+  // For seat_map+slots, once the user picks a slot, refresh booked seats
+  // filtered by that slot so we render the map correctly.
+  useEffect(() => {
+    if (!isSeatMapWithSlots || !slot) return;
+    (async () => {
+      try {
+        const b = await api.bookedSeats(String(id), slot);
+        setBooked(b);
+        setSelectedSeats([]);
+      } catch (err) { console.log("Slot seats err", err); }
+    })();
+  }, [slot, id, isSeatMapWithSlots]);
+
   const slotsInfo: Array<{ time: string; capacity: number; booked: number; remaining: number; sold_out: boolean }> = useMemo(() => {
     if (!event) return [];
     if (Array.isArray(event.slots_info)) return event.slots_info;
@@ -93,7 +112,10 @@ export default function Booking() {
 
   const canProceed = useMemo(() => {
     if (!event) return false;
-    if (event.booking_type === "seat_map") return selectedSeats.length > 0;
+    if (event.booking_type === "seat_map") {
+      if (isSeatMapWithSlots && !slot) return false;
+      return selectedSeats.length > 0;
+    }
     if (event.booking_type === "general") return numSeats > 0;
     if (event.booking_type === "time_slot") {
       if (!slot) return false;
@@ -101,7 +123,7 @@ export default function Booking() {
       return slotSeats > 0 && slotSeats <= currentSlotInfo.remaining && !currentSlotInfo.sold_out;
     }
     return false;
-  }, [event, selectedSeats, numSeats, slot, slotSeats, currentSlotInfo]);
+  }, [event, selectedSeats, numSeats, slot, slotSeats, currentSlotInfo, isSeatMapWithSlots]);
 
   const toggleSeat = (seat: string) => {
     if (booked.booked_seats.includes(seat)) return;
@@ -125,7 +147,9 @@ export default function Booking() {
               event.booking_type === "general" ? numSeats
               : event.booking_type === "time_slot" ? slotSeats
               : undefined,
-            time_slot: event.booking_type === "time_slot" ? slot : undefined,
+            time_slot:
+              event.booking_type === "time_slot" ? slot
+              : (isSeatMapWithSlots ? slot : undefined),
           });
           setRzpOrder(order as any);
           setRzpVisible(true);
@@ -147,7 +171,10 @@ export default function Booking() {
 
       // Pay-at-venue path (or free event)
       const body: any = { event_id: String(id) };
-      if (event.booking_type === "seat_map") body.seats = selectedSeats;
+      if (event.booking_type === "seat_map") {
+        body.seats = selectedSeats;
+        if (isSeatMapWithSlots) body.time_slot = slot;
+      }
       if (event.booking_type === "general") body.num_seats = numSeats;
       if (event.booking_type === "time_slot") {
         body.time_slot = slot;
@@ -197,23 +224,43 @@ export default function Booking() {
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle} numberOfLines={1}>{event.title}</Text>
           <Text style={styles.headerSub}>
-            {event.booking_type === "seat_map" ? "Select your seats" :
-             event.booking_type === "general" ? "Choose tickets" : "Pick a time slot"}
+            {event.booking_type === "seat_map"
+              ? (isSeatMapWithSlots && !slot ? "Pick a showing" : "Select your seats")
+              : event.booking_type === "general" ? "Choose tickets" : "Pick a time slot"}
           </Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}>
-        {event.booking_type === "seat_map" && (
-          <SeatMap
-            rows={event.seat_rows || 6}
-            cols={event.seat_cols || 8}
-            booked={booked.booked_seats}
-            selected={selectedSeats}
-            onToggle={toggleSeat}
+        {event.booking_type === "seat_map" && isSeatMapWithSlots && (
+          <TimeSlots
+            slotsInfo={slotsInfo}
+            takenSlots={booked.booked_slots}
+            value={slot}
+            onSelect={(s) => { Haptics.selectionAsync(); setSlot(s); }}
             styles={styles}
             colors={colors}
           />
+        )}
+
+        {event.booking_type === "seat_map" && (!isSeatMapWithSlots || slot) && (
+          <View style={{ marginTop: isSeatMapWithSlots ? spacing.xl : 0 }}>
+            {isSeatMapWithSlots && (
+              <View style={styles.slotHeader}>
+                <Ionicons name="time" size={14} color={colors.brand} />
+                <Text style={styles.slotHeaderText}>Showing: <Text style={styles.slotHeaderStrong}>{slot}</Text></Text>
+              </View>
+            )}
+            <SeatMap
+              rows={event.seat_rows || 6}
+              cols={event.seat_cols || 8}
+              booked={booked.booked_seats}
+              selected={selectedSeats}
+              onToggle={toggleSeat}
+              styles={styles}
+              colors={colors}
+            />
+          </View>
         )}
 
         {event.booking_type === "general" && (
@@ -640,6 +687,16 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderRadius: radius.lg,
   },
   slotStepperHint: { fontSize: 12, color: colors.muted, marginTop: -4 },
+  slotHeader: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.pill,
+    alignSelf: "flex-start",
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    marginBottom: spacing.md,
+  },
+  slotHeaderText: { fontSize: 13, color: colors.onSurface },
+  slotHeaderStrong: { fontWeight: "700", color: colors.brand },
 
   // Success
   successOverlay: {

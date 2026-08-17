@@ -105,7 +105,11 @@ export const api = {
     request(`/events/${id}`, { method: "PUT", body: JSON.stringify(body) }, true),
   deleteEvent: (id: string) =>
     request(`/events/${id}`, { method: "DELETE" }, true),
-  bookedSeats: (id: string) => request(`/events/${id}/booked-seats`, { method: "GET" }),
+  bookedSeats: (id: string, timeSlot?: string) =>
+    request(
+      `/events/${id}/booked-seats${timeSlot ? `?time_slot=${encodeURIComponent(timeSlot)}` : ""}`,
+      { method: "GET" },
+    ),
   myOrgEvents: () => request(`/organizer/events`, { method: "GET" }, true),
 
   // Bookings

@@ -15,6 +15,7 @@ import LocationPicker from "@/src/LocationPicker";
 import * as ImagePicker from "expo-image-picker";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import DateTimeField from "@/src/DateTimeField";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
 const BOOKING_TYPES = [
@@ -46,8 +47,9 @@ export default function EventForm({ editId }: Props) {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Music");
   const [imageUrl, setImageUrl] = useState(DEFAULT_IMAGES[0]);
-  const [dateStr, setDateStr] = useState(""); // YYYY-MM-DD
-  const [timeStr, setTimeStr] = useState(""); // HH:MM
+  // Start & End datetime — replaces the old single "date + time" text fields.
+  const [startAt, setStartAt] = useState<Date | null>(null);
+  const [endAt, setEndAt] = useState<Date | null>(null);
   const [locationName, setLocationName] = useState("");
   const [latitude, setLatitude] = useState("37.7749");
   const [longitude, setLongitude] = useState("-122.4194");
@@ -72,9 +74,11 @@ export default function EventForm({ editId }: Props) {
         setDescription(e.description);
         setCategory(e.category);
         setImageUrl(e.image_url || DEFAULT_IMAGES[0]);
-        const d = new Date(e.date);
-        setDateStr(d.toISOString().slice(0, 10));
-        setTimeStr(d.toISOString().slice(11, 16));
+        // Prefer new start_date/end_date, fall back to legacy `date`.
+        const startISO = e.start_date || e.date;
+        const endISO = e.end_date || null;
+        if (startISO) setStartAt(new Date(startISO));
+        if (endISO) setEndAt(new Date(endISO));
         setLocationName(e.location_name);
         setLatitude(String(e.latitude));
         setLongitude(String(e.longitude));
@@ -148,18 +152,19 @@ export default function EventForm({ editId }: Props) {
 
   const submit = async () => {
     setError(null);
-    if (!title.trim() || !description.trim() || !dateStr || !timeStr || !locationName.trim()) {
-      setError("Please fill title, description, date, time, and location.");
+    if (!title.trim() || !description.trim() || !startAt || !endAt || !locationName.trim()) {
+      setError("Please fill title, description, start, end, and location.");
       return;
     }
-    const iso = new Date(`${dateStr}T${timeStr}:00`).toISOString();
-    if (isNaN(new Date(iso).getTime())) {
-      setError("Invalid date/time. Use YYYY-MM-DD and HH:MM.");
+    if (endAt.getTime() <= startAt.getTime()) {
+      setError("End date/time must be after the start.");
       return;
     }
     const body: any = {
       title, description, category, image_url: imageUrl,
-      date: iso, location_name: locationName,
+      start_date: startAt.toISOString(),
+      end_date: endAt.toISOString(),
+      location_name: locationName,
       latitude: parseFloat(latitude), longitude: parseFloat(longitude),
       price: parseFloat(price) || 0,
       booking_type: bookingType,
@@ -167,6 +172,11 @@ export default function EventForm({ editId }: Props) {
     if (bookingType === "seat_map") {
       body.seat_rows = parseInt(seatRows) || 6;
       body.seat_cols = parseInt(seatCols) || 8;
+      // Optional: allow time slots on seat_map events too.
+      const cleaned = timeSlots
+        .map((s) => ({ time: s.time.trim(), capacity: 0 }))
+        .filter((s) => s.time.length > 0);
+      if (cleaned.length > 0) body.time_slots = cleaned.map((s) => s.time);
     } else if (bookingType === "general") {
       body.total_seats = parseInt(totalSeats) || 100;
     } else if (bookingType === "time_slot") {
@@ -302,11 +312,30 @@ export default function EventForm({ editId }: Props) {
             ))}
           </ScrollView>
 
-          <Label styles={styles}>Date</Label>
-          <TextInput testID="date-input" style={styles.input} placeholder="YYYY-MM-DD" value={dateStr} onChangeText={setDateStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
+          <Label styles={styles}>Starts</Label>
+          <DateTimeField
+            label="Start date & time"
+            value={startAt}
+            onChange={(d) => {
+              setStartAt(d);
+              // Auto-bump end if user picks a start that's after current end.
+              if (!endAt || endAt.getTime() <= d.getTime()) {
+                const nextEnd = new Date(d);
+                nextEnd.setDate(nextEnd.getDate() + 1);
+                setEndAt(nextEnd);
+              }
+            }}
+            testID="start-date-field"
+          />
 
-          <Label styles={styles}>Time (24h)</Label>
-          <TextInput testID="time-input" style={styles.input} placeholder="19:30" value={timeStr} onChangeText={setTimeStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
+          <Label styles={styles}>Ends</Label>
+          <DateTimeField
+            label="End date & time"
+            value={endAt}
+            onChange={setEndAt}
+            minDate={startAt || undefined}
+            testID="end-date-field"
+          />
 
           <Label styles={styles}>Location</Label>
           <Pressable
@@ -374,16 +403,55 @@ export default function EventForm({ editId }: Props) {
           </View>
 
           {bookingType === "seat_map" && (
-            <View style={styles.row2}>
-              <View style={{ flex: 1 }}>
-                <Label styles={styles}>Rows</Label>
-                <TextInput testID="rows-input" style={styles.input} value={seatRows} onChangeText={setSeatRows} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+            <>
+              <View style={styles.row2}>
+                <View style={{ flex: 1 }}>
+                  <Label styles={styles}>Rows</Label>
+                  <TextInput testID="rows-input" style={styles.input} value={seatRows} onChangeText={setSeatRows} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Label styles={styles}>Columns</Label>
+                  <TextInput testID="cols-input" style={styles.input} value={seatCols} onChangeText={setSeatCols} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Label styles={styles}>Columns</Label>
-                <TextInput testID="cols-input" style={styles.input} value={seatCols} onChangeText={setSeatCols} keyboardType="number-pad" placeholderTextColor={colors.muted} />
-              </View>
-            </View>
+
+              <Label styles={styles}>Time Slots (optional)</Label>
+              <Text style={styles.slotHelper}>
+                Leave empty for a single-show event, or add multiple showings.
+                Each showing uses the same seat map above.
+              </Text>
+              {timeSlots.map((s, i) => (
+                <View key={i} style={styles.slotRow}>
+                  <TextInput
+                    testID={`seatmap-slot-input-${i}`}
+                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder="e.g. Matinee · 2:00 PM"
+                    value={s.time}
+                    onChangeText={(v) => {
+                      const next = [...timeSlots]; next[i] = { ...next[i], time: v }; setTimeSlots(next);
+                    }}
+                    placeholderTextColor={colors.muted}
+                  />
+                  {timeSlots.length > 1 && (
+                    <Pressable
+                      testID={`seatmap-slot-remove-${i}`}
+                      style={styles.slotRemove}
+                      onPress={() => setTimeSlots(timeSlots.filter((_, idx) => idx !== i))}
+                    >
+                      <Ionicons name="close" size={16} color={colors.error} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+              <Pressable
+                style={styles.addSlot}
+                onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
+                testID="seatmap-add-slot-btn"
+              >
+                <Ionicons name="add" size={16} color={colors.brand} />
+                <Text style={styles.addSlotText}>Add another showing</Text>
+              </Pressable>
+            </>
           )}
 
           {bookingType === "general" && (
