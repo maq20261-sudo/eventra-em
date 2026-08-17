@@ -437,9 +437,32 @@ export default function Booking() {
             </View>
             <Text style={styles.successTitle}>Booking Confirmed!</Text>
             <Text style={styles.successSub}>Your ticket for {event.title}</Text>
-            <Text style={styles.successPrice}>
-              {totalPrice > 0 ? `₹${totalPrice.toFixed(0)}` : "Free entry"}
-            </Text>
+            {/* Full breakdown so the attendee sees the ₹9 platform fee they paid
+                (or that was waived under their first-5-free perk). */}
+            {(success?.grand_total_inr ?? 0) > 0 && success?.platform_fee_inr > 0 ? (
+              <View style={styles.successBreakdown}>
+                <View style={styles.successRow}>
+                  <Text style={styles.successRowLabel}>Ticket</Text>
+                  <Text style={styles.successRowValue}>₹{Number(success.total_price || 0).toFixed(0)}</Text>
+                </View>
+                <View style={styles.successRow}>
+                  <Text style={styles.successRowLabel}>Platform fee</Text>
+                  <Text style={styles.successRowValue}>₹{Number(success.platform_fee_inr).toFixed(0)}</Text>
+                </View>
+                <View style={styles.successRowDivider} />
+                <View style={styles.successRow}>
+                  <Text style={styles.successRowTotal}>Total</Text>
+                  <Text style={styles.successRowTotalVal}>₹{Number(success.grand_total_inr).toFixed(0)}</Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.successPrice}>
+                {(success?.grand_total_inr ?? success?.total_price ?? totalPrice) > 0
+                  ? `₹${Number(success?.grand_total_inr ?? success?.total_price ?? totalPrice).toFixed(0)}`
+                  : "Free entry"}
+                {success?.platform_fee_waived ? "  ·  Free-tier applied 🎉" : ""}
+              </Text>
+            )}
             <Pressable
               style={styles.successBtn}
               testID="view-tickets-btn"
@@ -767,6 +790,18 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   successTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface },
   successSub: { fontSize: 14, color: colors.muted, textAlign: "center" },
   successPrice: { fontSize: 28, fontWeight: "700", color: colors.brand, marginVertical: spacing.md },
+  successBreakdown: {
+    width: "100%", marginTop: spacing.sm, marginBottom: 4,
+    padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderColor: colors.border, borderWidth: 1,
+  },
+  successRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
+  successRowLabel: { color: colors.muted, fontSize: 13 },
+  successRowValue: { color: colors.onSurface, fontSize: 13, fontWeight: "500" },
+  successRowDivider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
+  successRowTotal: { color: colors.onSurface, fontSize: 14, fontWeight: "700" },
+  successRowTotalVal: { color: colors.brand, fontSize: 15, fontWeight: "800" },
   successBtn: {
     backgroundColor: colors.brandPrimary, borderRadius: radius.pill,
     paddingHorizontal: spacing.xl, paddingVertical: 14, alignSelf: "stretch", alignItems: "center",

@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 17 — 4 platform-fee bug fixes verified end-to-end. Backend: full pytest suite passes (125 executed after retrying 2 transient flakes; 4 known-skips). Added new test file /app/backend/tests/test_booking_fee_fields.py (3 tests, all pass) that specifically covers Bug #4 backend contract: POST /api/bookings response + GET /api/bookings/me both expose platform_fee_inr, platform_fee_waived, grand_total_inr with correct fallbacks for legacy seeded bookings. Frontend (390x844): FRESH ORGANIZER flow — Create screen initially shows quota-banner-free='Your first 5 events are FREE 🎉 · 1 of 1 free event left' + button 'Publish Event'; after publishing 1 event via API and re-entering the Create screen, useFocusEffect triggers quota refresh and the banner switches to quota-banner-paid='Publish fee: ₹19 · You've used all 1 free events. You'll be prompted to pay before publishing.' with the button re-labelled 'Publish for ₹19' — Bug #1 & Bug #2 label swap CONFIRMED. Bug #2 error-parsing verified via direct API: POST /api/events on quota-exhausted account returns HTTP 402 with detail={requires_platform_fee:true,fee_inr:19.0,message:...}; api.ts now attaches this raw detail as err.detail so EventForm's `err?.detail?.requires_platform_fee` branch fires and opens the Razorpay flow instead of surfacing raw JSON. FRESH CONSUMER flow — After booking a paid event (₹10) with quota=1/1, quota decremented to paid_bookings_used=1 / free_bookings_remaining=0 and the Discover offer-banner (testID='offer-banner') is CORRECTLY HIDDEN on next focus (useFocusEffect wired to useQuota) — Bug #3 CONFIRMED. Bug #4 ticket screen shows 'TOTAL ₹10' + 'Platform fee waived 🎉' subhint for a free-tier paid booking, and the at-venue banner reads 'Pay ₹10 at the venue when scanned' (grand_total_inr, not just total_price) — Bug #4 CONFIRMED. Razorpay web modal itself not driven live (documented native-module limitation).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "The frontend login form auto-lowercases the email before POSTing, but the backend user lookup on email is case-sensitive (`db.users.find({\"email\": body.email})`). If a user registered with a mixed-case email (via API or otherwise) they cannot sign in via the UI. Not part of this iteration's bugs, but worth flagging for the main agent. Repro: register with 'TEST_@example.com' via curl → try to log in via UI → 401."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_booking_fee_fields.py",
+    "/app/backend/tests/test_platform_fees.py",
+    "/app/test_reports/pytest/iteration_17.xml",
+    "/app/test_reports/screenshots/bug_50_create_screen.png",
+    "/app/test_reports/screenshots/bug_52_create_after_quota_consumed.png",
+    "/app/test_reports/screenshots/bug_71_ticket_paid_waived.png"
+  ],
+  "action_items": [
+    "(Optional) Fix email-case bug in /api/auth/login: either normalize both sides to lower-case at insert-time+lookup, or use case-insensitive Mongo regex query. Independent of this iteration's 4 bug fixes.",
+    "(Optional) Razorpay web checkout modal is a known native-module limitation. Confirm launch on Android build before shipping."
+  ],
+  "critical_code_review_comments": [
+    "api.ts:39-48 now attaches `err.detail` (raw response detail object) and `err.data` in addition to the flattened message — this is the correct fix for Bug #2 and unblocks any future 4xx handler that needs to branch on structured payloads (e.g. requires_platform_fee).",
+    "usePricing.ts:56 correctly wraps refresh() in useFocusEffect so quota reloads whenever ANY screen using useQuota gains focus — this is what fixes Bugs #1 and #3.",
+    "server.py BookingOut adds three optional fee fields with sane defaults (0.0 / False / computed grand_total) so LEGACY seeded bookings still serialize — verified in test_booking_fee_fields.py::TestSeededDemoBookingsBackwardsCompat.",
+    "server.py /api/bookings/me line 1609 defaults grand_total_inr to `total_price + (platform_fee_inr or 0)` when the field is missing on the stored doc — correct backward-compat fallback.",
+    "discover.tsx:417 lifts the offer-banner OUT of the empty/list conditional (was flagged in iteration 15) — now visible even on empty feeds when quota.attendee.free_bookings_remaining>0. Verified in this run.",
+    "server.py is still ~2430 lines and login is still case-sensitive on email — pre-existing tech-debt, orthogonal to this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_booking_fee_fields.py (NEW — 3 tests for BookingOut fee-field contract)"
+  ],
+  "success_rate": {
+    "backend": "100% (125/125 passing after retrying 2 unrelated flaky OTP tests that returned transient 502 Cloudflare on first attempt; 4 known-skip beyond-tier tests that require env=0)",
+    "frontend": "100% for the 4 targeted bugs (quota-banner-free, quota-banner-paid, Publish button label swap, offer-banner focus-refresh, ticket TOTAL + 'Platform fee waived 🎉' + at-venue grand_total). Razorpay modal launch not driven live due to web preview limitation, but the trigger path (402 → err.detail.requires_platform_fee) is verified separately."
+  },
+  "seed_data_creation": "Registered ephemeral test users under TEST_ui_org_*, TEST_ui_c_*, TEST_ui_c2_*, TEST_bf_c_*, TEST_bf_o_* (all via /api/auth/register). Created 1 free event owned by the fresh organizer to consume their quota. All test data prefixed for easy cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend .env was temporarily set to ORGANIZER_FREE_EVENT_LIMIT=1 and ATTENDEE_FREE_BOOKING_LIMIT=1 to exercise the paid-tier flow, then RESTORED to 999 at end of run (verified via /api/pricing/config). The UI login form auto-lowercases the email input, so if you register test accounts via API, use lowercase emails to be able to log in through the UI (or curl the backend directly for API-only tests). Note: FREE (₹0) event bookings do NOT decrement the attendee free-tier quota — only paid-event bookings do (paid_bookings_used counter). For Bug #3 UI verification you MUST book a paid event. Fresh consumer sees offer-banner with 'X of Y free bookings left · no ₹9 platform fee'; when free_bookings_remaining hits 0, the banner is (correctly) hidden entirely (no 'you're out of free bookings' upsell shown — this is by design).",
+  "rca_of_issue": "N/A — all 4 reported bugs verified as FIXED. Bug #1: usePricing.ts useQuota hook wraps refresh() in useFocusEffect, so returning to Create/Discover after an action re-fetches /api/quota/me. Bug #2: src/api.ts request() now sets `err.detail = detail` on non-2xx responses, exposing the raw {requires_platform_fee: true, ...} object to callers; EventForm.tsx line 203 reads `err?.detail?.requires_platform_fee` and opens the Razorpay flow instead of surfacing the stringified JSON. Bug #3: same useFocusEffect fix in useQuota, verified end-to-end with a paid-event booking. Bug #4 backend: BookingOut Pydantic model extended with platform_fee_inr, platform_fee_waived, grand_total_inr; _perform_booking populates them from fee_info; list_bookings safely defaults them from the stored doc with `b.get(field, default)` for legacy rows. Bug #4 frontend: ticket/[id].tsx uses `booking.grand_total_inr ?? booking.total_price` for the headline total, then conditionally renders 'incl. ₹X platform fee' (paid) or 'Platform fee waived 🎉' (waived). Book confirmation modal shows a 3-row breakdown (Ticket / Platform fee / Total) when a fee was charged, or a compact 'Total ₹X · Free-tier applied 🎉' single line when waived."
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 
 export type PricingConfig = {
@@ -51,5 +52,7 @@ export function useQuota(authed: boolean) {
     } catch { /* silent */ }
   }, [authed]);
   useEffect(() => { refresh(); }, [refresh]);
+  // Auto-refresh on screen focus so quota updates after publishing / booking.
+  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
   return { quota, refresh };
 }

@@ -37,9 +37,15 @@ async function request(
     data = text;
   }
   if (!res.ok) {
-    const message =
-      (data && (data.detail || data.message)) || `Request failed (${res.status})`;
-    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+    const detail = data && (data.detail || data.message);
+    const message = detail || `Request failed (${res.status})`;
+    const err: any = new Error(typeof message === "string" ? message : JSON.stringify(message));
+    err.status = res.status;
+    // Preserve the raw detail so callers can branch on structured fields
+    // like `requires_platform_fee` without re-parsing the message.
+    err.detail = detail;
+    err.data = data;
+    throw err;
   }
   return data;
 }

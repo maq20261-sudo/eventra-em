@@ -366,6 +366,10 @@ class BookingOut(BaseModel):
     num_seats: Optional[int] = None
     time_slot: Optional[str] = None
     total_price: float
+    # NEW: platform fee & grand total for accurate receipts.
+    platform_fee_inr: Optional[float] = 0.0
+    platform_fee_waived: Optional[bool] = False
+    grand_total_inr: Optional[float] = None
     status: str  # confirmed / cancelled / checked_in
     payment_status: str = "free"  # paid / unpaid / free / refunded / refund_pending / refund_failed
     checked_in: bool = False
@@ -1515,6 +1519,12 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         if booking_type == "time_slot":
             raise HTTPException(status_code=409, detail="Time slot already booked")
 
+    # Attendee-side platform fee. Applied uniformly whether paying online
+    # (already included in Razorpay amount) or at the venue (represents an
+    # amount the platform is owed but not yet collected — surfaces on the
+    # receipt so attendees know their true cost).
+    fee_info = await _resolve_booking_fee(user["id"], total_price)
+    platform_fee_inr = int(fee_info.get("fee_paise", 0)) / 100.0
     doc = {
         "id": booking_id,
         "event_id": body.event_id,
@@ -1525,6 +1535,11 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         "num_seats": num_units if booking_type in ("general", "time_slot") else body.num_seats,
         "time_slot": body.time_slot,
         "total_price": total_price,
+        # NEW: platform fee & grand total captured on the booking so the
+        # ticket / confirmation screens can render an accurate breakdown.
+        "platform_fee_inr": platform_fee_inr,
+        "platform_fee_waived": bool(fee_info.get("waived")),
+        "grand_total_inr": total_price + platform_fee_inr,
         "status": "confirmed",
         "payment_status": "paid" if payment else ("unpaid" if total_price > 0 else "free"),
         "payment": payment,
@@ -1554,6 +1569,9 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         num_seats=body.num_seats,
         time_slot=body.time_slot,
         total_price=total_price,
+        platform_fee_inr=platform_fee_inr,
+        platform_fee_waived=bool(fee_info.get("waived")),
+        grand_total_inr=total_price + platform_fee_inr,
         status="confirmed",
         payment_status=doc["payment_status"],
         checked_in=False,
@@ -1586,6 +1604,9 @@ async def my_bookings(user=Depends(get_current_user)):
             num_seats=b.get("num_seats"),
             time_slot=b.get("time_slot"),
             total_price=b.get("total_price", 0),
+            platform_fee_inr=b.get("platform_fee_inr", 0.0),
+            platform_fee_waived=b.get("platform_fee_waived", False),
+            grand_total_inr=b.get("grand_total_inr") or (b.get("total_price", 0) + (b.get("platform_fee_inr") or 0)),
             status=b.get("status", "confirmed"),
             payment_status=payment_status,
             checked_in=b.get("checked_in", False),

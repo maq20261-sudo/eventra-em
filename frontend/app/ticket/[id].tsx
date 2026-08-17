@@ -203,8 +203,18 @@ export default function TicketScreen() {
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={styles.smallLabel}>Total</Text>
                 <Text style={styles.priceValue}>
-                  {booking.total_price > 0 ? `₹${booking.total_price.toFixed(0)}` : "Free"}
+                  {(booking.grand_total_inr ?? booking.total_price) > 0
+                    ? `₹${Number(booking.grand_total_inr ?? booking.total_price).toFixed(0)}`
+                    : "Free"}
                 </Text>
+                {booking.platform_fee_inr > 0 && (
+                  <Text style={styles.feeHint}>
+                    incl. ₹{Number(booking.platform_fee_inr).toFixed(0)} platform fee
+                  </Text>
+                )}
+                {booking.platform_fee_waived && (
+                  <Text style={styles.feeHint}>Platform fee waived 🎉</Text>
+                )}
               </View>
             </View>
 
@@ -269,7 +279,7 @@ export default function TicketScreen() {
               <View style={styles.notice}>
                 <Ionicons name="wallet-outline" size={16} color={colors.warning} />
                 <Text style={styles.noticeText}>
-                  Pay ₹{booking.total_price.toFixed(0)} at the venue when scanned
+                  Pay ₹{Number(booking.grand_total_inr ?? booking.total_price).toFixed(0)} at the venue when scanned
                 </Text>
               </View>
             )}
@@ -445,6 +455,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   smallLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
   smallValue: { fontSize: 15, color: colors.onSurface, fontWeight: "500", marginTop: 2 },
   priceValue: { fontSize: 20, color: colors.brand, fontWeight: "700", marginTop: 2 },
+  feeHint: { fontSize: 10, color: colors.muted, marginTop: 2, fontWeight: "500" },
 
   qrWrap: { alignItems: "center", marginTop: spacing.lg, gap: 6 },
   qrBox: {
