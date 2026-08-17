@@ -14,6 +14,7 @@ import EventMap from "@/src/EventMap";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { eventDateRange } from "@/src/utils/eventDate";
+import { eventTypeLabel } from "@/src/utils/eventTypeLabel";
 
 export default function EventDetail() {
   const { colors } = useTheme();
@@ -129,8 +130,7 @@ export default function EventDetail() {
             <View style={styles.infoBlock}>
               <Text style={styles.infoLabel}>Type</Text>
               <Text style={styles.infoValue}>
-                {event.booking_type === "seat_map" ? "Reserved Seating" :
-                 event.booking_type === "general" ? "General Admission" : "Time Slot"}
+                {eventTypeLabel(event.booking_type)}
               </Text>
             </View>
             <View style={styles.infoBlock}>

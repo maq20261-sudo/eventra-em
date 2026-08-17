@@ -36,6 +36,7 @@ import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
 import { useQuota } from "@/src/hooks/usePricing";
 import { useAuth } from "@/src/AuthContext";
+import { eventTypeShortLabel, eventTypeIcon } from "@/src/utils/eventTypeLabel";
 
 const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
   { key: "All", label: "All", icon: "sparkles-outline", color: "#EF4444" },
@@ -59,6 +60,8 @@ type Event = {
   category: string;
   image_url?: string;
   date: string;
+  start_date?: string;
+  end_date?: string;
   location_name: string;
   latitude: number;
   longitude: number;
@@ -568,6 +571,10 @@ export default function Discover() {
                     {e.distance_km != null ? ` · ${e.distance_km.toFixed(1)}km` : ""}
                   </Text>
                 </View>
+                <View style={styles.typeChip} testID={`event-type-chip-${e.id}`}>
+                  <Ionicons name={eventTypeIcon(e.booking_type) as any} size={11} color={colors.brand} />
+                  <Text style={styles.typeChipText}>{eventTypeShortLabel(e.booking_type)}</Text>
+                </View>
               </View>
             </Pressable>
           ))}
@@ -793,6 +800,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   metaText: { fontSize: 13, color: colors.muted, flex: 1 },
+  typeChip: {
+    flexDirection: "row", alignSelf: "flex-start",
+    alignItems: "center", gap: 4,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 3,
+    marginTop: 6,
+  },
+  typeChipText: { fontSize: 11, color: colors.brand, fontWeight: "700" },
 
   modalBg: {
     flex: 1, backgroundColor: "rgba(17,24,39,0.5)", justifyContent: "flex-end",

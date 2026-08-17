@@ -11,6 +11,7 @@ import { api } from "@/src/api";
 import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import { eventTypeShortLabel, eventTypeIcon } from "@/src/utils/eventTypeLabel";
 
 type Event = {
   id: string; title: string; date: string; start_date?: string; end_date?: string;
@@ -171,6 +172,10 @@ export default function OrganizerEvents() {
                       <View style={styles.metaRow}>
                         <Ionicons name="location-outline" size={12} color={colors.muted} />
                         <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
+                      </View>
+                      <View style={styles.typeChip} testID={`event-type-chip-${e.id}`}>
+                        <Ionicons name={eventTypeIcon(e.booking_type) as any} size={11} color={colors.brand} />
+                        <Text style={styles.typeChipText}>{eventTypeShortLabel(e.booking_type)}</Text>
                       </View>
                       {dim && (
                         <View style={styles.endedChip}>
@@ -359,6 +364,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginTop: 4,
   },
   endedChipText: { fontSize: 11, color: colors.muted, fontWeight: "600" },
+  typeChip: {
+    flexDirection: "row", alignSelf: "flex-start",
+    alignItems: "center", gap: 4,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 2,
+    marginTop: 4,
+  },
+  typeChipText: { fontSize: 10, color: colors.brand, fontWeight: "700" },
   card: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.card,
