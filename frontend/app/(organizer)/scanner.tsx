@@ -163,8 +163,17 @@ export default function Scanner() {
   const previewInvalid = preview && !preview.ok;
   const previewValid = preview && preview.ok;
   const isPaid = preview?.booking?.payment_status === "paid";
-  const owesMoney = (preview?.booking?.total_price || 0) > 0 && !isPaid;
-  const price = preview?.booking?.total_price || 0;
+  // `grand_total_inr` is the source of truth for what the organizer must
+  // collect at the gate (ticket + ₹9 attendee platform fee when not
+  // waived). Fall back to ticket + fee for legacy scans; final fallback
+  // to ticket alone so nothing breaks on very old bookings.
+  const ticketPrice = preview?.booking?.total_price || 0;
+  const platformFee = preview?.booking?.platform_fee_inr || 0;
+  const grandTotal =
+    preview?.booking?.grand_total_inr ??
+    (ticketPrice + platformFee);
+  const owesMoney = grandTotal > 0 && !isPaid;
+  const price = grandTotal;
   const ttype = ticketTypeLine(preview?.booking);
   const canConfirm =
     !!previewValid &&
@@ -311,6 +320,11 @@ export default function Scanner() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.rowLabel}>Amount</Text>
                       <Text style={styles.rowValue}>₹{price.toFixed(0)}</Text>
+                      {platformFee > 0 && (
+                        <Text style={styles.rowSub}>
+                          Ticket ₹{ticketPrice.toFixed(0)} + platform fee ₹{platformFee.toFixed(0)}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 )}

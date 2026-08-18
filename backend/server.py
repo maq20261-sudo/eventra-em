@@ -1948,6 +1948,12 @@ class CheckInRequest(BaseModel):
 async def _safe_booking_for_scanner(b: dict) -> dict:
     """Trim a booking dict for the scanner UI. Strips payment ids and any
     other sensitive fields the organizer's phone doesn't need to see."""
+    total_price = b.get("total_price", 0) or 0
+    platform_fee = b.get("platform_fee_inr", 0) or 0
+    # grand_total_inr may be missing on legacy bookings; derive it.
+    grand_total = b.get("grand_total_inr")
+    if grand_total is None:
+        grand_total = total_price + platform_fee
     return {
         "id": b.get("id"),
         "event_id": b.get("event_id"),
@@ -1955,13 +1961,19 @@ async def _safe_booking_for_scanner(b: dict) -> dict:
         "seats": b.get("seats"),
         "num_seats": b.get("num_seats"),
         "time_slot": b.get("time_slot"),
-        "total_price": b.get("total_price", 0),
+        "total_price": total_price,
+        # Surface platform fee + grand total so the scanner popup can show
+        # the exact amount the organizer needs to collect at the gate
+        # (ticket price + ₹9 attendee platform fee when applicable).
+        "platform_fee_inr": platform_fee,
+        "platform_fee_waived": bool(b.get("platform_fee_waived", False)),
+        "grand_total_inr": grand_total,
         "status": b.get("status", "confirmed"),
         "checked_in": b.get("checked_in", False),
         "checked_in_at": b.get("checked_in_at"),
         "cancelled_at": b.get("cancelled_at"),
         # Only surface a coarse paid/unpaid/refunded flag — no ids/amounts.
-        "payment_status": b.get("payment_status", "free" if b.get("total_price", 0) == 0 else "unpaid"),
+        "payment_status": b.get("payment_status", "free" if total_price == 0 else "unpaid"),
     }
 
 async def _load_booking_for_organizer(booking_id: str, user: dict):
