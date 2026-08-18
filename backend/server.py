@@ -2502,6 +2502,28 @@ async def _startup_indexes_and_backfill():
     except Exception as e:  # pragma: no cover
         logger.warning("Reconcile warning: %s", e)
 
+    # --- Migration 003: backfill status + hold_reasons on legacy events ---
+    # Idempotent — a no-op once every doc has the fields. Runs on every
+    # startup so newly-deployed environments (staging, prod) self-heal
+    # without needing a manual DB script.
+    try:
+        added_status = await db.events.update_many(
+            {"status": {"$exists": False}},
+            {"$set": {"status": "ACTIVE"}},
+        )
+        added_reasons = await db.events.update_many(
+            {"hold_reasons": {"$exists": False}},
+            {"$set": {"hold_reasons": []}},
+        )
+        if added_status.modified_count or added_reasons.modified_count:
+            logger.info(
+                "Backfilled event status on %d event(s), hold_reasons on %d event(s).",
+                added_status.modified_count,
+                added_reasons.modified_count,
+            )
+    except Exception as e:  # pragma: no cover
+        logger.warning("Event-status backfill warning: %s", e)
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
