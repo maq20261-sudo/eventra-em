@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -121,6 +121,19 @@ import httpx as _httpx  # local alias so we don't touch other imports
 
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
 _PLACES_BASE = "https://places.googleapis.com/v1"
+
+
+# --- Event verification workflow ---
+# When enabled, new events start in IN_REVIEW and are hidden from
+# attendees until an admin flips status to ACTIVE in Mongo. Any organizer
+# update to an ACTIVE event resets it back to IN_REVIEW.
+EVENT_STATUSES = ("IN_REVIEW", "ACTIVE", "REJECTED", "ON_HOLD")
+
+def _event_verification_enabled() -> bool:
+    """Read at call-time so tests / admins can toggle without restart."""
+    return os.environ.get("EVENT_VERIFICATION_ENABLED", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 class PlacesAutocompleteBody(BaseModel):
@@ -348,6 +361,10 @@ class EventOut(BaseModel):
     is_past: Optional[bool] = None
     is_featured: bool = False
     featured_until: Optional[str] = None
+    # --- Verification workflow (see EVENT_VERIFICATION_ENABLED) ---
+    # Default ACTIVE so listings from a pre-migration DB remain visible.
+    status: str = "ACTIVE"
+    hold_reasons: List[str] = []
     created_at: str
 
 class BookingCreate(BaseModel):
@@ -439,6 +456,30 @@ def require_role(role: str):
         return user
     return dep
 
+
+async def get_current_user_optional(request: Request):
+    """Best-effort auth: returns the user if a valid Bearer token is
+    present, otherwise None. Used by public endpoints that still want to
+    let the owner see their own draft/in-review resources."""
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        return None
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        token_version = payload.get("tv", 1)
+        if not user_id:
+            return None
+    except jwt.PyJWTError:
+        return None
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        return None
+    if int(user.get("token_version", 0)) != int(token_version):
+        return None
+    return user
+
 def haversine_km(lat1, lon1, lat2, lon2):
     R = 6371.0
     dLat = math.radians(lat2 - lat1)
@@ -479,6 +520,8 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
         "distance_km": distance_km,
         "is_featured": is_featured,
         "featured_until": featured_until,
+        "status": e.get("status", "ACTIVE"),
+        "hold_reasons": list(e.get("hold_reasons") or []),
         "created_at": e["created_at"],
     }
 
@@ -1064,6 +1107,13 @@ async def create_event(body: EventCreate, user=Depends(require_role("organizer")
             int(fee_info["fee_paise"]) if not fee_info["waived"] else 0
         ),
         "platform_fee_waived": bool(fee_info["waived"]),
+        # --- Verification workflow ---
+        # When the flag is ON: new events land in IN_REVIEW and stay
+        # hidden until an admin sets status=ACTIVE in Mongo.
+        # When OFF: keep events visible immediately (status=ACTIVE) so we
+        # don't accidentally hide anything from attendees.
+        "status": "IN_REVIEW" if _event_verification_enabled() else "ACTIVE",
+        "hold_reasons": [],
     })
     await db.events.insert_one(doc)
     # Mark the platform fee intent as consumed for single-use guarantee.
@@ -1099,6 +1149,11 @@ async def list_events(
         safe = re.escape(search.strip())[:128]
         if safe:
             query["title"] = {"$regex": safe, "$options": "i"}
+    # Verification-workflow gate: when enabled, attendees see only ACTIVE
+    # events. Organizers use /organizer/events (which does NOT apply this
+    # filter) to see their in-review / on-hold entries.
+    if _event_verification_enabled():
+        query["status"] = "ACTIVE"
     events = await db.events.find(query, {"_id": 0}).to_list(1000)
     # Compute "past" flag using end_date (fallback: legacy `date`). Filter
     # out ended events from the default discover list; keep only past ones
@@ -1202,10 +1257,17 @@ async def _compute_slots_info(e: dict) -> Optional[List[Dict[str, Any]]]:
 
 
 @api_router.get("/events/{event_id}", response_model=EventOut)
-async def get_event(event_id: str):
+async def get_event(event_id: str, user=Depends(get_current_user_optional)):
     e = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not e:
         raise HTTPException(status_code=404, detail="Event not found")
+    # Verification gate: non-ACTIVE events are only visible to the owner
+    # (or unauthenticated public / attendee endpoints see 404). When the
+    # flag is OFF we bypass this check entirely.
+    if _event_verification_enabled() and e.get("status", "ACTIVE") != "ACTIVE":
+        is_owner = bool(user and user.get("id") == e.get("organizer_id"))
+        if not is_owner:
+            raise HTTPException(status_code=404, detail="Event not found")
     out = event_doc_to_out(e)
     out["slots_info"] = await _compute_slots_info(e)
     end_iso = e.get("end_date") or e.get("date")
@@ -1263,6 +1325,15 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
         update_data["slot_capacities"] = None
     elif "time_slots" in update_data:
         update_data.pop("time_slots", None)
+    # Verification workflow: any organizer edit to an ACTIVE event kicks
+    # it back into IN_REVIEW (and clears any prior hold reasons) so it
+    # is re-verified by an admin before going live again. Only applies
+    # when the feature flag is enabled.
+    if _event_verification_enabled() and update_data:
+        current_status = e.get("status", "ACTIVE")
+        if current_status == "ACTIVE":
+            update_data["status"] = "IN_REVIEW"
+            update_data["hold_reasons"] = []
     if update_data:
         await db.events.update_one({"id": event_id}, {"$set": update_data})
     updated = await db.events.find_one({"id": event_id}, {"_id": 0})
@@ -1380,6 +1451,13 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         raise HTTPException(
             status_code=400,
             detail="This event has already ended and is no longer accepting bookings.",
+        )
+
+    # Verification workflow: attendees can only book ACTIVE events.
+    if _event_verification_enabled() and event.get("status", "ACTIVE") != "ACTIVE":
+        raise HTTPException(
+            status_code=400,
+            detail="This event is not currently accepting bookings.",
         )
 
     # SEC-003 fix: compute price + units up front, then perform an ATOMIC

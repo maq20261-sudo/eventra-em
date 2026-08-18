@@ -12,6 +12,9 @@ import RazorpayCheckout, { RzpOrder } from "@/src/RazorpayCheckout";
 import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { eventTypeShortLabel, eventTypeIcon } from "@/src/utils/eventTypeLabel";
+import { eventStatusMeta } from "@/src/utils/eventStatus";
+
+type EventStatus = "IN_REVIEW" | "ACTIVE" | "REJECTED" | "ON_HOLD";
 
 type Event = {
   id: string; title: string; date: string; start_date?: string; end_date?: string;
@@ -21,6 +24,8 @@ type Event = {
   time_slots?: string[]; slot_capacities?: Record<string, number>; slot_capacity?: number;
   is_featured?: boolean; featured_until?: string | null;
   is_past?: boolean;
+  status?: EventStatus | string;
+  hold_reasons?: string[];
 };
 
 function fmt(iso: string) {
@@ -173,10 +178,34 @@ export default function OrganizerEvents() {
                         <Ionicons name="location-outline" size={12} color={colors.muted} />
                         <Text style={styles.metaText} numberOfLines={1}>{e.location_name}</Text>
                       </View>
-                      <View style={styles.typeChip} testID={`event-type-chip-${e.id}`}>
-                        <Ionicons name={eventTypeIcon(e.booking_type) as any} size={11} color={colors.brand} />
-                        <Text style={styles.typeChipText}>{eventTypeShortLabel(e.booking_type)}</Text>
+                      <View style={styles.chipsRow}>
+                        <View style={styles.typeChip} testID={`event-type-chip-${e.id}`}>
+                          <Ionicons name={eventTypeIcon(e.booking_type) as any} size={11} color={colors.brand} />
+                          <Text style={styles.typeChipText}>{eventTypeShortLabel(e.booking_type)}</Text>
+                        </View>
+                        {(() => {
+                          const meta = eventStatusMeta(e.status);
+                          return (
+                            <View
+                              style={[styles.statusChip, { backgroundColor: meta.bg }]}
+                              testID={`event-status-chip-${e.id}`}
+                            >
+                              <Ionicons name={meta.icon as any} size={11} color={meta.fg} />
+                              <Text style={[styles.statusChipText, { color: meta.fg }]}>
+                                {meta.label}
+                              </Text>
+                            </View>
+                          );
+                        })()}
                       </View>
+                      {e.hold_reasons && e.hold_reasons.length > 0 && (
+                        <View style={styles.holdReasonRow} testID={`event-hold-reasons-${e.id}`}>
+                          <Ionicons name="information-circle-outline" size={12} color="#9A3412" />
+                          <Text style={styles.holdReasonText} numberOfLines={2}>
+                            {e.hold_reasons.join(" · ")}
+                          </Text>
+                        </View>
+                      )}
                       {dim && (
                         <View style={styles.endedChip}>
                           <Ionicons name="time-outline" size={11} color={colors.muted} />
@@ -373,6 +402,34 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     marginTop: 4,
   },
   typeChipText: { fontSize: 10, color: colors.brand, fontWeight: "700" },
+  chipsRow: {
+    flexDirection: "row", flexWrap: "wrap",
+    alignItems: "center", gap: 6,
+    marginTop: 4,
+  },
+  statusChip: {
+    flexDirection: "row",
+    alignItems: "center", gap: 4,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
+  statusChipText: { fontSize: 10, fontWeight: "700" },
+  holdReasonRow: {
+    flexDirection: "row",
+    alignItems: "flex-start", gap: 4,
+    marginTop: 6,
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: radius.sm,
+    backgroundColor: "#FFF7ED",
+    borderLeftWidth: 3, borderLeftColor: "#F97316",
+  },
+  holdReasonText: {
+    flex: 1,
+    fontSize: 11,
+    color: "#9A3412",
+    fontWeight: "500",
+    lineHeight: 15,
+  },
   card: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
     padding: spacing.md, marginBottom: spacing.sm, ...shadows.card,

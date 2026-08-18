@@ -18,6 +18,7 @@ import { spacing, radius, shadows } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import DateTimeField from "@/src/DateTimeField";
 import LocationSearchField from "@/src/LocationSearchField";
+import { eventStatusMeta } from "@/src/utils/eventStatus";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
 const BOOKING_TYPES = [
@@ -65,6 +66,11 @@ export default function EventForm({ editId }: Props) {
   const [timeSlots, setTimeSlots] = useState<{ time: string; capacity: number }[]>([
     { time: "", capacity: 50 },
   ]);
+  // Verification workflow status — read-only in the form (admin flips it
+  // in the DB). We surface it as a banner so organizers know when their
+  // event is IN_REVIEW / ON_HOLD / REJECTED and see any hold reasons.
+  const [status, setStatus] = useState<string | null>(null);
+  const [holdReasons, setHoldReasons] = useState<string[]>([]);
   // Modal state for the "drop-a-pin on map" picker.
   const [pickerOpen, setPickerOpen] = useState(false);
   // Platform-fee flow: for event #6+ the organizer must pay ₹19 first.
@@ -99,6 +105,8 @@ export default function EventForm({ editId }: Props) {
     setSeatCols("8");
     setTotalSeats("100");
     setTimeSlots([{ time: "", capacity: 50 }]);
+    setStatus(null);
+    setHoldReasons([]);
     (async () => {
       try {
         const e = await api.getEvent(editId);
@@ -117,6 +125,8 @@ export default function EventForm({ editId }: Props) {
         setLongitude(String(e.longitude));
         setPrice(String(e.price));
         setBookingType(e.booking_type);
+        setStatus(e.status || null);
+        setHoldReasons(Array.isArray(e.hold_reasons) ? e.hold_reasons : []);
         if (e.seat_rows) setSeatRows(String(e.seat_rows));
         if (e.seat_cols) setSeatCols(String(e.seat_cols));
         if (e.total_seats) setTotalSeats(String(e.total_seats));
@@ -311,6 +321,48 @@ export default function EventForm({ editId }: Props) {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 200 }}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Verification-workflow banner — only shown in edit mode when
+              the backend surfaces a status. Non-ACTIVE events (IN_REVIEW,
+              ON_HOLD, REJECTED) explain why the event isn't live yet and
+              list any admin-provided hold reasons. */}
+          {isEdit && status && (() => {
+            const meta = eventStatusMeta(status);
+            return (
+              <View
+                style={[styles.statusBanner, { backgroundColor: meta.bg }]}
+                testID="event-status-banner"
+              >
+                <View style={[styles.statusBannerIcon, { backgroundColor: meta.fg + "22" }]}>
+                  <Ionicons name={meta.icon as any} size={18} color={meta.fg} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.statusBannerTitle, { color: meta.fg }]}>
+                    Status · {meta.label}
+                  </Text>
+                  <Text style={[styles.statusBannerSub, { color: meta.fg }]}>
+                    {status === "ACTIVE"
+                      ? "This event is live and visible to attendees."
+                      : status === "IN_REVIEW"
+                      ? "Waiting for admin review — attendees can't see it yet."
+                      : status === "ON_HOLD"
+                      ? "Temporarily paused by admin. See reasons below."
+                      : "Rejected by admin. See reasons below."}
+                  </Text>
+                  {holdReasons.length > 0 && (
+                    <View style={styles.holdReasonsList}>
+                      {holdReasons.map((r, i) => (
+                        <View key={i} style={styles.holdReasonItem}>
+                          <Ionicons name="ellipse" size={5} color={meta.fg} style={{ marginTop: 6 }} />
+                          <Text style={[styles.holdReasonItemText, { color: meta.fg }]}>{r}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          })()}
+
           {/* Free-tier / platform-fee banner for organizers. */}
           {!isEdit && quota?.organizer && (
             quota.organizer.free_events_remaining > 0 ? (
@@ -746,6 +798,22 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   quotaSubFree: { color: "#0F766E", fontSize: 12, marginTop: 2 },
   quotaTitlePaid: { color: colors.brand, fontSize: 14, fontWeight: "700" },
   quotaSubPaid: { color: colors.onSurfaceSecondary || colors.muted, fontSize: 12, marginTop: 2 },
+  statusBanner: {
+    flexDirection: "row", alignItems: "flex-start", gap: spacing.md,
+    borderRadius: radius.lg, padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  statusBannerIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: "center", justifyContent: "center",
+  },
+  statusBannerTitle: { fontSize: 14, fontWeight: "700", letterSpacing: 0.3 },
+  statusBannerSub: { fontSize: 12, marginTop: 2, opacity: 0.85 },
+  holdReasonsList: { marginTop: 8, gap: 4 },
+  holdReasonItem: {
+    flexDirection: "row", alignItems: "flex-start", gap: 6,
+  },
+  holdReasonItemText: { flex: 1, fontSize: 12, lineHeight: 16 },
   locPicker: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary,
