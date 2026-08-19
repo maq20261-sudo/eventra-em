@@ -22,10 +22,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maq.gatherspace",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find events happening near you",
         "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance",
-        "NSPhotoLibraryUsageDescription": "Upload a cover image for your event"
+        "NSPhotoLibraryUsageDescription": "Upload a cover image for your event",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
