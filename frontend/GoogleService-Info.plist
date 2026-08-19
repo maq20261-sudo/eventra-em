@@ -1,54 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  PLACEHOLDER GoogleService-Info.plist
-  =====================================
-  @react-native-firebase/auth requires `ios.googleServicesFile` in app.json
-  or the Expo config resolver (used by EAS Build) fails with:
-    [ios.infoPlist]: withIosInfoPlistBaseMod: [@react-native-firebase/auth]
-    Your app.json file is missing ios.googleServicesFile.
-
-  This file satisfies the build-time schema check so the IPA compiles.
-  It uses the same Firebase project (gatherspace-541ac) as the Android
-  google-services.json. The IOS_CLIENT_ID and REVERSED_CLIENT_ID are
-  synthetic — Firebase Phone Auth on iOS will only work AFTER you:
-    1. Firebase Console → Project settings → Add app → iOS
-       Bundle ID: com.maq.gatherspace
-       Download the real GoogleService-Info.plist
-    2. Overwrite this file with the downloaded one
-    3. Redeploy from the Publish panel
-
-  Until then, iOS builds succeed but iOS Phone-OTP login fails at runtime.
--->
 <plist version="1.0">
 <dict>
-  <key>API_KEY</key>
-  <string>AIzaSyAgviptlrJqolZ_BWGabr6Uhu0JMMNP9pE</string>
-  <key>GCM_SENDER_ID</key>
-  <string>574130409424</string>
-  <key>PLIST_VERSION</key>
-  <string>1</string>
-  <key>BUNDLE_ID</key>
-  <string>com.maq.gatherspace</string>
-  <key>PROJECT_ID</key>
-  <string>gatherspace-541ac</string>
-  <key>STORAGE_BUCKET</key>
-  <string>gatherspace-541ac.firebasestorage.app</string>
-  <key>IS_ADS_ENABLED</key>
-  <false/>
-  <key>IS_ANALYTICS_ENABLED</key>
-  <false/>
-  <key>IS_APPINVITE_ENABLED</key>
-  <true/>
-  <key>IS_GCM_ENABLED</key>
-  <true/>
-  <key>IS_SIGNIN_ENABLED</key>
-  <true/>
-  <key>GOOGLE_APP_ID</key>
-  <string>1:574130409424:ios:placeholderplaceholder000000</string>
-  <key>CLIENT_ID</key>
-  <string>574130409424-placeholder.apps.googleusercontent.com</string>
-  <key>REVERSED_CLIENT_ID</key>
-  <string>com.googleusercontent.apps.574130409424-placeholder</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCrEz8Q39-OrQX5tSlZZZ3XS2QmCVd5xG4</string>
+	<key>GCM_SENDER_ID</key>
+	<string>574130409424</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.maq.gatherspace</string>
+	<key>PROJECT_ID</key>
+	<string>gatherspace-541ac</string>
+	<key>STORAGE_BUCKET</key>
+	<string>gatherspace-541ac.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:574130409424:ios:9715c2b1778bd06c1bf3d5</string>
 </dict>
 </plist>
