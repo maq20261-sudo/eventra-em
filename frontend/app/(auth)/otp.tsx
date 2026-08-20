@@ -20,6 +20,10 @@ import { spacing, radius } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { sendOtp, verifyOtp } from "@/src/firebase";
 import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
+// Pull the raw Firebase Auth module so we can subscribe to
+// onAuthStateChanged for the Android SMS-Retriever auto-verify path.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const _rnfbAuth: any = (() => { try { return require("@react-native-firebase/auth"); } catch { return null; } })();
 
 export default function OtpScreen() {
   const router = useRouter();
@@ -38,6 +42,9 @@ export default function OtpScreen() {
     (params.mobile_masked as string) || session?.confirmation.mobileMasked || ""
   );
   const inputRef = useRef<TextInput>(null);
+  // Guard so the auto-verify listener and manual submit can't both fire
+  // firebaseVerify at the same time.
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
@@ -56,7 +63,67 @@ export default function OtpScreen() {
     }
   }, [session, router]);
 
+  // Android SMS-Retriever auto-verify path
+  // On some Android devices (particularly on Play Store distributed
+  // builds whose signing cert matches the SMS Retriever hash) Firebase
+  // silently signs the user in the moment the SMS arrives — before the
+  // user even sees the code. When that happens `.confirm()` throws
+  // `auth/session-expired` because the session was already consumed.
+  // Listen for the auto-sign-in and drive the same backend verify flow
+  // that manual submit uses.
+  useEffect(() => {
+    if (!_rnfbAuth || !session) return;
+    let unsub: any = null;
+    try {
+      const authInstance =
+        typeof _rnfbAuth.getAuth === "function"
+          ? _rnfbAuth.getAuth()
+          : typeof _rnfbAuth.default === "function"
+          ? _rnfbAuth.default()
+          : null;
+      if (!authInstance) return;
+      const onChange = async (user: any) => {
+        if (!user || submittingRef.current) return;
+        if (!session.email || !session.password || !session.name || !session.role) return;
+        submittingRef.current = true;
+        setLoading(true);
+        try {
+          const idToken =
+            typeof _rnfbAuth.getIdToken === "function"
+              ? await _rnfbAuth.getIdToken(user, true)
+              : await user.getIdToken(true);
+          const res = await api.firebaseVerify({
+            id_token: idToken,
+            name: session.name,
+            email: session.email,
+            password: session.password,
+            role: session.role,
+          });
+          await signInWithToken(res.access_token, res.user);
+          clearPhoneSession();
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
+          else router.replace("/(consumer)/discover" as any);
+        } catch (e: any) {
+          submittingRef.current = false;
+          setError(e?.message || "Verification failed");
+        } finally {
+          setLoading(false);
+        }
+      };
+      if (typeof _rnfbAuth.onAuthStateChanged === "function") {
+        unsub = _rnfbAuth.onAuthStateChanged(authInstance, onChange);
+      } else if (typeof authInstance.onAuthStateChanged === "function") {
+        unsub = authInstance.onAuthStateChanged(onChange);
+      }
+    } catch {
+      /* auto-verify hook is best-effort */
+    }
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [session, router, signInWithToken]);
+
   const submit = async () => {
+    if (submittingRef.current) return;
     if (otp.length < 6) {
       setError("Enter the 6-digit OTP");
       return;
@@ -69,6 +136,7 @@ export default function OtpScreen() {
       setError("Signup details missing. Please go back and try again.");
       return;
     }
+    submittingRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -89,6 +157,7 @@ export default function OtpScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       const msg = e?.message || "Verification failed";
       setError(msg);
+      submittingRef.current = false;
       // If the Firebase verification session expired (raw error string
       // contains "expired"), unlock the Resend button immediately so the
       // user isn't stuck watching the 60-second timer tick down.

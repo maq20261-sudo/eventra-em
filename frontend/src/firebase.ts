@@ -101,9 +101,30 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
   if (!RN_FIREBASE_AUTH_AVAILABLE || !conf?.__confirmation) {
     throw new Error("Verification session missing. Please request a new OTP.");
   }
+  const authInstance = resolveAuth();
+  // FAST-PATH — Android SMS-Retriever auto-verify
+  // On Android, if Play services + our SMS Retriever hash matches the
+  // installed APK's signing cert (true from Closed-testing onwards),
+  // Firebase silently signs the user in the moment the SMS arrives —
+  // WITHOUT waiting for us to call .confirm(otp). If we then call
+  // .confirm() on an already-consumed session it throws
+  // `auth/session-expired`. So: check for an already-signed-in user first
+  // and short-circuit with their ID token before touching .confirm().
+  if (authInstance.currentUser) {
+    try {
+      let idTokenAuto: string | null = null;
+      if (typeof _fbAuth.getIdToken === "function") {
+        idTokenAuto = await _fbAuth.getIdToken(authInstance.currentUser, true);
+      } else if (typeof authInstance.currentUser.getIdToken === "function") {
+        idTokenAuto = await authInstance.currentUser.getIdToken(true);
+      }
+      if (idTokenAuto) return idTokenAuto;
+    } catch {
+      /* fall through to manual .confirm() attempt */
+    }
+  }
   try {
     const credential = await conf.__confirmation.confirm(otp);
-    const authInstance = resolveAuth();
     const currentUser = credential?.user || authInstance.currentUser;
     if (!currentUser) throw new Error("Verification session expired. Please try again.");
     // Modular getIdToken(user, forceRefresh) OR instance-method getIdToken(forceRefresh)
@@ -117,6 +138,26 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
     return idToken;
   } catch (e: any) {
     const code = e?.code || "";
+    // LAST-CHANCE fast-path — if Firebase auto-verified between our
+    // pre-check above and the .confirm() call, currentUser is now set
+    // and we can still salvage the flow. This dodges the `session-expired`
+    // race that happens on fast SMS Retriever devices.
+    if (code.includes("session-expired") || code.includes("code-expired")) {
+      const nowUser = authInstance.currentUser;
+      if (nowUser) {
+        try {
+          let salvaged: string | null = null;
+          if (typeof _fbAuth.getIdToken === "function") {
+            salvaged = await _fbAuth.getIdToken(nowUser, true);
+          } else if (typeof nowUser.getIdToken === "function") {
+            salvaged = await nowUser.getIdToken(true);
+          }
+          if (salvaged) return salvaged;
+        } catch {
+          /* fall through to user-facing error */
+        }
+      }
+    }
     if (code.includes("invalid-verification-code"))
       throw new Error("Incorrect OTP. Please check the code and try again.");
     // Firebase throws BOTH `auth/code-expired` (the 6-digit SMS code is
