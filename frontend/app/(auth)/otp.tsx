@@ -87,7 +87,14 @@ export default function OtpScreen() {
       else router.replace("/(consumer)/discover" as any);
     } catch (e: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(e?.message || "Verification failed");
+      const msg = e?.message || "Verification failed";
+      setError(msg);
+      // If the Firebase verification session expired (raw error string
+      // contains "expired"), unlock the Resend button immediately so the
+      // user isn't stuck watching the 60-second timer tick down.
+      if (/expired|missing|resend/i.test(msg)) {
+        setSeconds(0);
+      }
     } finally {
       setLoading(false);
     }
