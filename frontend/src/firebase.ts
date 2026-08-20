@@ -119,8 +119,15 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
     const code = e?.code || "";
     if (code.includes("invalid-verification-code"))
       throw new Error("Incorrect OTP. Please check the code and try again.");
-    if (code.includes("code-expired"))
-      throw new Error("OTP expired. Please tap Resend and try again.");
+    // Firebase throws BOTH `auth/code-expired` (the 6-digit SMS code is
+    // stale) AND `auth/session-expired` (the underlying verification
+    // session / reCAPTCHA challenge expired — typically ~5 min).
+    // Users hit the second one when they tab out to fetch the code from
+    // SMS. Surface the same friendly nudge for either.
+    if (code.includes("code-expired") || code.includes("session-expired"))
+      throw new Error("OTP expired. Please tap Resend to get a new code.");
+    if (code.includes("missing-verification-code") || code.includes("missing-verification-id"))
+      throw new Error("Verification session missing. Please tap Resend and try again.");
     throw new Error(e?.message || "Verification failed");
   }
 }

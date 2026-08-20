@@ -776,15 +776,18 @@ async def firebase_verify(body: FirebaseVerifyBody):
             return TokenResponse(access_token=token, user=_user_out(existing_same_role))
 
         # Genuine same-role duplicate — some detail differs. Log server-side
-        # (with the specific collision field) but return a neutral message
-        # so we don't leak account enumeration signals.
+        # (with the specific collision field) but return a message that
+        # names the ACTUAL existing account's role (not `body.role`) so
+        # the user always sees a consistent label even if the frontend
+        # accidentally re-sent a stale role from a previous session.
         collided = (
             "firebase_uid" if existing_same_role.get("firebase_uid") == firebase_uid
             else "mobile" if existing_same_role.get("mobile") == mobile_stored
             else "email" if existing_same_role.get("email") == email
             else "unknown"
         )
-        role_label = "Attendee" if body.role == "consumer" else "Organizer"
+        existing_role = existing_same_role.get("role", body.role)
+        role_label = "Attendee" if existing_role == "consumer" else "Organizer"
         log.warning(
             "firebase-verify: 409 same-role duplicate role=%s collided_on=%s existing_user=%s",
             body.role, collided, existing_same_role["id"],
