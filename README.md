@@ -2,6 +2,8 @@
 
 Event discovery and booking app. Attendees find and book nearby events; organizers create events, check in attendees by QR and see analytics.
 
+Project context, decisions and history: [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) · status and next steps: [`docs/ROADMAP.md`](docs/ROADMAP.md) · AI-assistant guide: [`CLAUDE.md`](CLAUDE.md).
+
 | Part | Stack | Folder |
 |---|---|---|
 | Mobile app | Expo SDK 54 (React Native 0.81), expo-router, React Native Firebase (phone OTP) | `frontend/` |
