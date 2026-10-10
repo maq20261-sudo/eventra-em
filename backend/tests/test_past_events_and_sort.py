@@ -202,7 +202,7 @@ class TestBookingsBlockedOnPast:
         assert r.status_code == 400, r.text
         assert PAST_ENDED_MSG in r.json().get("detail", "")
 
-    def test_payments_order_returns_400_on_past(self, created_events, consumer_headers_mod):
+    def test_payments_order_returns_400_on_past(self, created_events, consumer_headers_mod, requires_payments):
         payload = {
             "kind": "booking",
             "event_id": created_events["past"]["id"],

@@ -38,7 +38,7 @@ class TestPlacesAutocomplete:
             headers=organizer_headers,
         )
         # If upstream key/quota fails, endpoint may return 502; skip in that case.
-        if r.status_code == 502:
+        if r.status_code in (502, 503):  # 503 = no Google key (e.g. CI)
             pytest.skip("Google Places upstream unavailable")
         assert r.status_code == 200, r.text
         data = r.json()
@@ -62,7 +62,7 @@ class TestPlacesAutocomplete:
         r = api.post(
             f"{base_url}/api/places/autocomplete", json=body, headers=organizer_headers,
         )
-        if r.status_code == 502:
+        if r.status_code in (502, 503):  # 503 = no Google key (e.g. CI)
             pytest.skip("Google Places upstream unavailable")
         assert r.status_code == 200, r.text
         assert isinstance(r.json().get("suggestions"), list)
@@ -84,7 +84,7 @@ class TestPlacesDetails:
             json={"input": "phoenix marketcity mumbai", "session_token": session_token},
             headers=organizer_headers,
         )
-        if r1.status_code == 502:
+        if r1.status_code in (502, 503):  # 503 = no Google key (e.g. CI)
             pytest.skip("Google Places upstream unavailable")
         assert r1.status_code == 200, r1.text
         sugg = r1.json().get("suggestions") or []
@@ -96,7 +96,7 @@ class TestPlacesDetails:
             json={"place_id": pid, "session_token": session_token},
             headers=organizer_headers,
         )
-        if r2.status_code == 502:
+        if r2.status_code in (502, 503):  # 503 = no Google key (e.g. CI)
             pytest.skip("Google Places upstream unavailable for details")
         assert r2.status_code == 200, r2.text
         d = r2.json()

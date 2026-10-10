@@ -125,7 +125,7 @@ def _get_any_paid_event():
 
 
 class TestBookingBreakdown:
-    def test_booking_order_free_tier_waiver(self, fresh_consumer):
+    def test_booking_order_free_tier_waiver(self, fresh_consumer, requires_payments):
         """Fresh consumer under free tier → fee_waived=true, platform_fee_inr=0."""
         att_lim = _current_att_limit()
         if att_lim <= 0:
@@ -167,7 +167,7 @@ class TestBookingBreakdown:
 # ---------- 4. Organizer platform-fee order ----------
 
 class TestOrganizerPlatformFeeOrder:
-    def test_free_tier_returns_400(self, fresh_organizer):
+    def test_free_tier_returns_400(self, fresh_organizer, requires_payments):
         """Fresh organizer under free tier → 400 'No payment needed yet'."""
         if _current_org_limit() <= 0:
             pytest.skip("Organizer limit=0 — free tier path skipped")

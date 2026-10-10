@@ -22,7 +22,8 @@ Emergent AI platform; it is now fully decoupled and developed locally.
 - `backend/` — FastAPI + MongoDB (Motor), single `server.py`; tests in `backend/tests`.
 - `docker-compose.yml` — local stack (mongo + backend with hot reload + debugger, isolated test profile).
 - `.vscode/` — launch/tasks/settings for VS Code (debug backend in Docker, Metro, tests).
-- `docs/` — project context + roadmap (keep these updated at the end of each work session).
+- `deploy/` — production compose, Caddyfile, server setup + backup scripts; `.github/workflows/backend.yml` — CI/CD (tests → GHCR → Lightsail).
+- `docs/` — project context + roadmap + `DEPLOYMENT.md` runbook (keep these updated at the end of each work session).
 
 ## Everyday commands (Windows, from repo root)
 ```powershell
@@ -33,7 +34,12 @@ cd frontend; npx expo start --dev-client -c          # Metro for the phone dev b
 cd frontend; npx tsc --noEmit -p .                   # typecheck (must be clean)
 ```
 Demo logins (local): `demo@organizer.com` / `demo@consumer.com`, password `password123`.
-Expected test baseline: all pass except `test_only_past_returns_only_ended_events` (needs Emergent's old data).
+Expected test baseline: all pass except `test_only_past_returns_only_ended_events` (needs Emergent's old data). Tests needing Razorpay/Google keys skip when keys are absent (as in GitHub CI).
+
+## Production rules
+- Production = `APP_ENV=production` on the Lightsail server; never run `seed.py` or tests against the Atlas database.
+- Never hardcode secrets; production secrets live only in `/opt/gatherspace/backend.env` + `firebase-admin.json` on the server and in GitHub Actions secrets.
+- Payment code paths must stay idempotent (`_fulfil_intent`) — the app's verify call and the Razorpay webhook can arrive in any order.
 
 ## Environment gotchas (learned the hard way)
 - Tool shells may lack PATH entries: prepend `C:\Program Files\nodejs` and `C:\Program Files\Rancher Desktop\resources\resources\win32\bin` (docker).

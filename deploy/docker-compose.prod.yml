@@ -1,0 +1,53 @@
+# Production stack on the Lightsail server (/opt/gatherspace).
+#
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Files expected next to this one on the server (never in git):
+#   .env                  IMAGE_TAG / API_DOMAIN / ACME_EMAIL (written by deploys)
+#   backend.env           backend settings + secrets (template: backend.env.example)
+#   firebase-admin.json   Firebase Admin service-account key
+# MongoDB is Atlas (MONGO_URL in backend.env); there is no local database.
+
+name: gatherspace
+
+services:
+  backend:
+    image: ghcr.io/maq20261-sudo/gatherspace-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ./backend.env
+    environment:
+      APP_ENV: production
+      TRUST_X_FORWARDED_FOR: "1"
+      FIREBASE_ADMIN_JSON_PATH: credentials/firebase-admin.json
+    volumes:
+      - ./firebase-admin.json:/app/credentials/firebase-admin.json:ro
+    expose:
+      - "8001"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.gatherspace.in}
+      ACME_EMAIL: ${ACME_EMAIL:-support@gatherspace.in}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:

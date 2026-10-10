@@ -11,14 +11,22 @@ _Last updated: 2026-10-10_
 |---|---|
 | Part A — local development (Docker, VS Code, dev build, accounts) | ✅ Done (`7bdc823`) |
 | UI/UX redesign "Neon Night" + excitement features + brand assets | ✅ Done (`a064b6f`), tested by the owner on Android dev build |
-| Part B — AWS production | ⏳ Next — plan below, not started |
+| Part B — AWS production | 🔨 In progress — **B1 code done** (branch `feat/aws-production`); B2 accounts next, runbook `docs/DEPLOYMENT.md` |
 | Part C — bug fixes | ⏳ After B (some may be pulled earlier) |
 | Store release of the new app | ⏳ After B |
 
+## Decisions (2026-10-10)
+- `main` becomes the real branch: PR the work into `main`; deploys run from `main`.
+- `EVENT_VERIFICATION_ENABLED=false` at launch (no admin screen exists).
+- Event images move to S3 as part of Part B.
+- DNS for `gatherspace.in` is at **GoDaddy**.
+- Part C #1 ("paid but no booking") fixed **before** launch — done in B1.
+
 ## Open actions for the owner
 - [ ] Enable **Geocoding API** on the Google Cloud key (server fallback for area names).
-- [ ] Decide `main` strategy: PR `feat/neon-redesign` (contains `chore/decouple-emergent`) into `main` and make `main` the deploy branch.
-- [ ] Push `feat/neon-redesign` to GitHub.
+- [ ] PR into `main` (when B1 is approved), then follow `docs/DEPLOYMENT.md` steps 1–8.
+- [x] Push `feat/neon-redesign` to GitHub (done 2026-10-10).
+- [ ] Razorpay KYC / live activation (needed for live keys + webhook).
 - [ ] New EAS **development build** to see the new icon/splash (`npx eas-cli build --profile development --platform android`).
 - [ ] iOS: `npx eas-cli device:create` on the iPhone, then an iOS dev build.
 - [ ] Play Console → App integrity: confirm Play App Signing, then **request upload-key reset** with the EAS upload certificate (takes Google a few days — start early).
@@ -40,7 +48,14 @@ _Last updated: 2026-10-10_
 
 Why Lightsail, not EC2: fixed price with public IPv4 and transfer included (EC2 charges ~$3.60/month just for the IPv4). Deliberately avoided for cost: load balancer ($16+), ECS/Fargate ($15–30), DocumentDB (~$200), NAT gateway (~$32). Upgrade path: Lightsail 2 GB ($12) and Atlas Flex when traffic grows; a load balancer only if more than one server is needed.
 
-### Steps (proposed)
+### B1 — done on `feat/aws-production` (2026-10-10)
+- `deploy/`: `docker-compose.prod.yml` (backend from GHCR + Caddy), `Caddyfile` (auto HTTPS, HSTS, 10 MB body), `setup-server.sh` (Docker, 2 GB swap, ufw, unattended upgrades, backup cron), `backup.sh` (nightly mongodump → S3), `backend.env.example`.
+- `.github/workflows/backend.yml`: tests on every push/PR (Mongo service, no external keys) → on `main`: build → GHCR `ghcr.io/maq20261-sudo/gatherspace-backend:<sha>` → scp + SSH deploy → health smoke test (deploy gated by repo variable `DEPLOY_ENABLED=true`).
+- Backend: `/api/health` (DB ping); legacy signup/MSG91 endpoints off in production (`ENABLE_LEGACY_AUTH`); `seed.py` refuses `APP_ENV=production`; blank Razorpay keys = unset; prod image runs 2 uvicorn workers with proxy headers; S3 cover images (`image_store.py`, migration `004_images_to_s3.py`).
+- **Part C #1 fixed**: availability pre-check before creating the Razorpay order; idempotent `_fulfil_intent` (atomic claim; app verify and webhook can't double-apply); automatic refund when a paid booking/boost can't be completed; `POST /api/payments/webhook` (`payment.captured`, HMAC-verified) completes payments when the app never returns; orders request auto-capture.
+- Tests: `test_payment_safety.py` (+6), Google/Razorpay-dependent tests skip without keys (CI). Local: 153 passed / 1 known; simulated CI: 135 passed / 22 skipped.
+
+### Steps (original plan; 1, 4–7 implemented in B1)
 1. **Production config in code**
    - `docker-compose.prod.yml`: backend (no reload, no debugpy, `INSTALL_DEV=0`, 2 uvicorn workers or gunicorn) + Caddy (`Caddyfile`: `api.gatherspace.in` → backend:8001, HSTS, gzip).
    - `APP_ENV=production`, `TRUST_X_FORWARDED_FOR=1`, `CORS_ORIGINS` set, `EVENT_VERIFICATION_ENABLED` decision, `DISABLE_RATE_LIMIT=0`.
@@ -65,15 +80,15 @@ Why Lightsail, not EC2: fixed price with public IPv4 and transfer included (EC2 
 
 | # | Issue | Where / notes | Proposed fix |
 |---|---|---|---|
-| 1 | **Paid but no booking**: Razorpay captures money, then `verify_payment` → `_perform_booking` can fail (e.g. 409 seat taken) with no refund | `server.py` `verify_payment` / `_perform_booking` | Reserve inventory before order creation (hold with expiry) or auto-refund on failure; add Razorpay **webhook** (`payment.captured`) as source of truth; idempotent `payment_intents` |
+| 1 | ~~Paid but no booking~~ — **fixed in B1** (pre-check, idempotent fulfilment, auto-refund, webhook) | `_check_booking_availability`, `_fulfil_intent`, `/payments/webhook` | Remaining idea: short seat *holds* during checkout to avoid even the refund case |
 | 2 | **OTP bypass via stale Firebase user**: when the JWT expires `AuthContext.refresh` clears the token but not Firebase `currentUser`; `verifyOtp` / `otp.tsx` `onAuthStateChanged` can reuse the old user/phone | `src/AuthContext.tsx`, `src/firebase.ts`, `app/(auth)/otp.tsx` | `firebaseSignOut()` on logout/refresh failure; verify the phone of the confirmed credential matches the requested phone; server checks the ID token's phone |
 | 3 | **Time-slot oversell**: aggregate-then-`$inc` is not atomic | `_perform_booking` time-slot branch | Atomic conditional update per slot (`$expr` booked + n ≤ capacity) like the general-admission path |
 | 4 | **Event deletion orphans bookings**, no refunds | `DELETE /events/{id}` | Block deletion with active bookings, or cancel + refund all and notify |
-| 5 | **Seat list not validated** (duplicates, out-of-grid seats) | `BookingCreate` / `_perform_booking` | Validate seat ids against rows/cols, dedupe |
-| 6 | **Legacy signup endpoints** bypass phone verification | `/auth/register`, MSG91 endpoints | Disable in production (feature flag) and remove later |
-| 7 | **Base64 images in Mongo**, returned in list responses | `image_url` | Move to S3 (Part B step 5) |
-| 8 | `seed.py` wipes all bookings | `seed.py` | Refuse to run in production |
-| 9 | Blank Razorpay keys counted as configured | `_RZP_CONFIGURED` | Treat empty strings as unset |
+| 5 | **Seat list not validated** (out-of-grid seats; duplicates now rejected at order time only) | `BookingCreate` / `_perform_booking` | Validate seat ids against rows/cols, dedupe in `_perform_booking` too |
+| 6 | ~~Legacy signup endpoints~~ — **off in production** (B1, `ENABLE_LEGACY_AUTH`) | — | Remove the code later |
+| 7 | ~~Base64 images in Mongo~~ — **S3 in B1** (run migration 004 in prod) | `image_store.py` | — |
+| 8 | ~~`seed.py` wipes all bookings~~ — **refuses in production** (B1) | — | — |
+| 9 | ~~Blank Razorpay keys counted as configured~~ — **fixed** (B1) | — | — |
 | 10 | Minor | — | GET booked-seats writes to DB; `BookingOut.num_seats` null; frontend hardcodes 2 h cancel cutoff (read from server); `LogBox.ignoreAllLogs`; ESLint resolver binding; light theme polish; `test_only_past_returns_only_ended_events` relies on old data |
 
 ## Ideas parked for later

@@ -22,6 +22,7 @@ import jwt
 from passlib.context import CryptContext
 import razorpay
 import firebase_admin_util as fb
+import image_store
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -43,12 +44,32 @@ SECRET_KEY = _JWT_SECRET_ENV
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_placeholder")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "placeholder_secret")
+# Blank values (e.g. `RAZORPAY_KEY_ID=` left in .env) count as "not set" —
+# previously they were treated as configured and checkout failed.
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip() or "rzp_test_placeholder"
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip() or "placeholder_secret"
 _RZP_CONFIGURED = not (
     RAZORPAY_KEY_ID.endswith("placeholder") or RAZORPAY_KEY_SECRET.endswith("placeholder_secret")
 )
 rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+# Secret for verifying Razorpay webhooks (Dashboard → Webhooks). Webhook
+# endpoint is disabled until this is set.
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip()
+
+# Legacy signup/OTP endpoints (plain /auth/register and the MSG91 flow) skip
+# Firebase phone verification. The app no longer uses them; keep them for
+# local tests only. Off by default in production.
+ENABLE_LEGACY_AUTH = os.environ.get(
+    "ENABLE_LEGACY_AUTH", "0" if APP_ENV == "production" else "1"
+).strip().lower() in ("1", "true", "yes")
+_LEGACY_AUTH_PATHS = {
+    "/api/auth/register",
+    "/api/auth/register/start",
+    "/api/auth/register/verify",
+    "/api/auth/login/start",
+    "/api/auth/login/verify",
+    "/api/auth/otp/resend",
+}
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -82,6 +103,14 @@ _RL_DISABLED = os.environ.get("DISABLE_RATE_LIMIT", "").lower() in ("1", "true",
 # (Kubernetes ingress, CDN, etc.). Attackers can spoof this header when we
 # accept it blindly; opt in via env only in production.
 _TRUST_XFF = os.environ.get("TRUST_X_FORWARDED_FOR", "").lower() in ("1", "true", "yes")
+
+
+@app.middleware("http")
+async def legacy_auth_gate(request, call_next):
+    if not ENABLE_LEGACY_AUTH and request.url.path in _LEGACY_AUTH_PATHS:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -1093,6 +1122,8 @@ async def create_event(body: EventCreate, user=Depends(require_role("organizer")
     event_id = str(uuid.uuid4())
     doc = body.model_dump()
     doc.pop("platform_intent_id", None)  # never persist on the event
+    # Uploaded covers (data URIs) go to S3; only the URL is stored.
+    doc["image_url"] = await image_store.persist_image(doc.get("image_url"))
     # Normalize time_slots — now supported for BOTH time_slot AND seat_map
     # events (seat_map + slots = same grid, different availability per slot).
     if doc.get("booking_type") == "time_slot":
@@ -1297,6 +1328,8 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "image_url" in update_data:
+        update_data["image_url"] = await image_store.persist_image(update_data["image_url"])
     # Normalize date fields: `date` is legacy alias for start_date; if
     # start_date changes, mirror into `date` for back-compat.
     if "date" in update_data and "start_date" not in update_data:
@@ -1455,6 +1488,69 @@ async def my_events(user=Depends(require_role("organizer"))):
 
 # ---------- Booking Routes ----------
 
+async def _slot_booked_units(event_id: str, time_slot: str) -> int:
+    """Seats already taken in a time slot (confirmed + checked-in bookings)."""
+    agg = db.bookings.aggregate([
+        {"$match": {
+            "event_id": event_id,
+            "time_slot": time_slot,
+            "status": {"$in": ["confirmed", "checked_in"]},
+        }},
+        {"$group": {"_id": None, "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
+    ])
+    existing = 0
+    async for row in agg:
+        existing = int(row.get("n") or 0)
+    return existing
+
+
+async def _check_booking_availability(
+    event: dict, seats: Optional[List[str]], num_seats: Optional[int], time_slot: Optional[str]
+) -> None:
+    """Pre-check run BEFORE a Razorpay order is created, so we don't take
+    money for seats/slots that are already gone. `_perform_booking`'s atomic
+    reservation remains the final guard (a race can still slip through —
+    that case is auto-refunded at verify time)."""
+    bt = event["booking_type"]
+    if bt in ("seat_map", "time_slot"):
+        event = await _reconcile_event_availability(event["id"]) or event
+    if bt == "seat_map" and seats:
+        if len(set(seats)) != len(seats):
+            raise HTTPException(status_code=400, detail="The same seat was selected twice.")
+        if event.get("time_slots") and time_slot:
+            taken = set((event.get("seats_by_slot") or {}).get(time_slot, []))
+        else:
+            taken = set(event.get("booked_seats") or [])
+        conflict = [s for s in seats if s in taken]
+        if conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Seat(s) already booked: {', '.join(conflict)}. Please pick different seats.",
+            )
+    elif bt == "general" and num_seats:
+        capacity = int(event.get("total_seats") or 0)
+        booked = int(event.get("booked_count") or 0)
+        if booked + int(num_seats) > capacity:
+            remaining = max(0, capacity - booked)
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Only {remaining} ticket(s) left." if remaining else "This event is sold out."),
+            )
+    elif bt == "time_slot" and time_slot:
+        slot_caps: Dict[str, int] = event.get("slot_capacities") or {}
+        fallback_cap = int(event.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
+        slot_cap = int(slot_caps.get(time_slot, fallback_cap))
+        existing = await _slot_booked_units(event["id"], time_slot)
+        units = int(num_seats or 1)
+        if existing + units > slot_cap:
+            remaining = max(0, slot_cap - existing)
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Only {remaining} seat(s) left in this slot." if remaining
+                        else "This slot is fully booked."),
+            )
+
+
 async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Dict[str, Any]] = None) -> BookingOut:
     event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
     if not event:
@@ -1558,17 +1654,7 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
                 raise HTTPException(status_code=400, detail="Please choose at least 1 seat")
             price = event["price"] * units
             # Sum booked seats for this slot from confirmed/checked_in bookings.
-            agg = db.bookings.aggregate([
-                {"$match": {
-                    "event_id": body.event_id,
-                    "time_slot": body.time_slot,
-                    "status": {"$in": ["confirmed", "checked_in"]},
-                }},
-                {"$group": {"_id": None, "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
-            ])
-            existing = 0
-            async for row in agg:
-                existing = int(row.get("n") or 0)
+            existing = await _slot_booked_units(body.event_id, body.time_slot)
             if existing + units > slot_cap:
                 remaining = max(0, slot_cap - existing)
                 raise HTTPException(
@@ -2229,6 +2315,8 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
                 detail="This event has already ended and is no longer accepting bookings.",
             )
         ticket_subtotal_inr = _compute_booking_amount(event, body.seats, body.num_seats, body.time_slot)
+        # Don't take money for seats/slots that are already gone.
+        await _check_booking_availability(event, body.seats, body.num_seats, body.time_slot)
         # Attendee-side platform fee (₹9) with first-5-free waiver.
         fee_info = await _resolve_booking_fee(user["id"], ticket_subtotal_inr)
         fee_paise = int(fee_info["fee_paise"])
@@ -2276,6 +2364,9 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
             "amount": amount_paise,
             "currency": "INR",
             "receipt": intent_id[:40],
+            # Capture automatically so a successful payment can be refunded
+            # straight away if the booking can't be completed.
+            "payment_capture": 1,
             "notes": {"kind": body.kind, "intent_id": intent_id},
         })
     except Exception as exc:
@@ -2323,6 +2414,90 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         }
     return resp
 
+def _intent_failure_detail(intent: dict) -> str:
+    """User-facing message for an intent whose fulfilment failed."""
+    refund = intent.get("refund") or {}
+    reason = intent.get("failure_reason") or "We couldn't complete your booking."
+    amount = intent.get("amount_inr") or 0
+    if refund.get("status") == "refund_pending":
+        return (f"{reason} Your payment of ₹{amount:.0f} has been refunded "
+                "and will reach your account in 5-7 business days.")
+    return (f"{reason} Your payment of ₹{amount:.0f} will be refunded by our team "
+            "within 24 hours.")
+
+
+async def _fulfil_intent(intent: dict, user: dict, payment_info: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Apply a paid intent exactly once (called from the app's /payments/verify
+    and from the Razorpay webhook — whichever arrives first).
+
+    Claims the intent atomically (created → processing), applies its effect,
+    and stores the result. If the booking/boost can't be applied after the
+    money was taken (e.g. the last seat sold in the meantime), the payment is
+    refunded automatically and the intent is marked `refunded` /
+    `refund_failed` so it is never charged without a result.
+    Returns the stored result; raises HTTPException for failed/in-flight intents.
+    """
+    claimed = await db.payment_intents.find_one_and_update(
+        {"id": intent["id"], "status": {"$in": ["created", "signature_failed"]}},
+        {"$set": {"status": "processing", "processing_since": datetime.now(timezone.utc).isoformat(),
+                  "processing_source": source}},
+    )
+    if not claimed:
+        current = await db.payment_intents.find_one({"id": intent["id"]}, {"_id": 0}) or {}
+        st = current.get("status")
+        if st == "paid":
+            return current.get("result") or {}
+        if st in ("refunded", "refund_failed"):
+            raise HTTPException(status_code=409, detail=_intent_failure_detail(current))
+        raise HTTPException(
+            status_code=409,
+            detail="Your payment is being processed. Please check My Tickets in a moment.",
+        )
+
+    kind = intent["kind"]
+    payload = intent["payload"]
+    try:
+        if kind == "booking":
+            booking_body = BookingCreate(
+                event_id=payload["event_id"],
+                seats=payload.get("seats"),
+                num_seats=payload.get("num_seats"),
+                time_slot=payload.get("time_slot"),
+            )
+            booking = await _perform_booking(booking_body, user, payment=payment_info)
+            result: Dict[str, Any] = {"kind": "booking", "booking": booking.model_dump()}
+        elif kind == "platform_fee":
+            # No side-effect at verify time — client will use `intent_id` when
+            # posting POST /api/events to prove the fee was paid. Marking the
+            # intent as `paid` locks it against replay (see event-create guard).
+            result = {"kind": "platform_fee", "platform_intent_id": intent["id"]}
+        elif kind == "boost":
+            boost_res = await _apply_boost(payload["boost_event_id"], user, payload["tier"], payment=payment_info)
+            result = {"kind": "boost", **boost_res}
+        else:
+            raise HTTPException(status_code=400, detail="Unknown intent kind")
+    except Exception as exc:  # money was taken but nothing was delivered → refund
+        reason = exc.detail if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else (
+            "We couldn't complete your booking.")
+        log.error("Fulfilment failed for intent %s (%s): %s — refunding", intent["id"], kind, exc)
+        refund = await _issue_razorpay_refund(payment_info)
+        failed = {
+            "status": "refunded" if refund.get("status") == "refund_pending" else "refund_failed",
+            "payment": payment_info,
+            "refund": refund,
+            "failure_reason": reason,
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.payment_intents.update_one({"id": intent["id"]}, {"$set": failed})
+        raise HTTPException(status_code=409, detail=_intent_failure_detail({**intent, **failed}))
+
+    await db.payment_intents.update_one(
+        {"id": intent["id"]},
+        {"$set": {"status": "paid", "payment": payment_info, "result": result}},
+    )
+    return result
+
+
 @api_router.post("/payments/verify")
 async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
     intent = await db.payment_intents.find_one({"id": body.intent_id}, {"_id": 0})
@@ -2333,7 +2508,7 @@ async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
     if intent["razorpay_order_id"] != body.razorpay_order_id:
         raise HTTPException(status_code=400, detail="Order id mismatch")
     if intent["status"] == "paid":
-        # Idempotent: return existing result
+        # Idempotent: return existing result (e.g. the webhook got there first)
         return {"ok": True, "already_paid": True, "result": intent.get("result")}
 
     # Verify signature
@@ -2344,7 +2519,7 @@ async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
     ).hexdigest()
     if not hmac.compare_digest(expected, body.razorpay_signature):
         await db.payment_intents.update_one(
-            {"id": body.intent_id},
+            {"id": body.intent_id, "status": "created"},
             {"$set": {"status": "signature_failed"}},
         )
         raise HTTPException(status_code=400, detail="Invalid payment signature")
@@ -2357,39 +2532,65 @@ async def verify_payment(body: PaymentVerify, user=Depends(get_current_user)):
         "amount_inr": intent["amount_inr"],
         "paid_at": datetime.now(timezone.utc).isoformat(),
     }
-
-    kind = intent["kind"]
-    payload = intent["payload"]
-    result: Dict[str, Any]
-    if kind == "booking":
-        booking_body = BookingCreate(
-            event_id=payload["event_id"],
-            seats=payload.get("seats"),
-            num_seats=payload.get("num_seats"),
-            time_slot=payload.get("time_slot"),
-        )
-        booking = await _perform_booking(booking_body, user, payment=payment_info)
-        result = {"kind": "booking", "booking": booking.model_dump()}
-    elif kind == "platform_fee":
-        # No side-effect at verify time — client will use `intent_id` when
-        # posting POST /api/events to prove the fee was paid. Marking the
-        # intent as `paid` locks it against replay (see event-create guard).
-        result = {"kind": "platform_fee", "platform_intent_id": intent["id"]}
-    elif kind == "boost":
-        boost_res = await _apply_boost(payload["boost_event_id"], user, payload["tier"], payment=payment_info)
-        result = {"kind": "boost", **boost_res}
-    else:
-        raise HTTPException(status_code=400, detail="Unknown intent kind")
-
-    await db.payment_intents.update_one(
-        {"id": body.intent_id},
-        {"$set": {
-            "status": "paid",
-            "payment": payment_info,
-            "result": result,
-        }},
-    )
+    result = await _fulfil_intent(intent, user, payment_info, source="app")
     return {"ok": True, "already_paid": False, "result": result}
+
+
+@api_router.post("/payments/webhook")
+async def razorpay_webhook(request: Request):
+    """Razorpay → server notification (Dashboard → Settings → Webhooks, events
+    `payment.captured`). Completes payments whose app never called
+    /payments/verify (app closed, network drop after paying). Idempotent with
+    verify via `_fulfil_intent`."""
+    from fastapi.responses import JSONResponse
+    if not RAZORPAY_WEBHOOK_SECRET:
+        return JSONResponse(status_code=503, content={"detail": "Webhook not configured"})
+    raw = await request.body()
+    signature = request.headers.get("x-razorpay-signature", "")
+    expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
+        return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
+
+    import json as _json
+    try:
+        event = _json.loads(raw)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON"})
+    if event.get("event") != "payment.captured":
+        return {"ok": True, "ignored": event.get("event")}
+
+    entity = ((event.get("payload") or {}).get("payment") or {}).get("entity") or {}
+    order_id = entity.get("order_id")
+    payment_id = entity.get("id")
+    intent = await db.payment_intents.find_one({"razorpay_order_id": order_id}, {"_id": 0}) if order_id else None
+    if not intent:
+        log.warning("Webhook for unknown order %s (payment %s)", order_id, payment_id)
+        return {"ok": True, "ignored": "unknown order"}
+    if intent["status"] not in ("created", "signature_failed"):
+        return {"ok": True, "status": intent["status"]}  # already handled
+    if int(entity.get("amount") or 0) != int(intent["amount_paise"]):
+        log.error("Webhook amount mismatch for intent %s: %s != %s",
+                  intent["id"], entity.get("amount"), intent["amount_paise"])
+        return {"ok": True, "ignored": "amount mismatch"}
+
+    user = await db.users.find_one({"id": intent["user_id"]}, {"_id": 0})
+    if not user:
+        log.error("Webhook: user %s for intent %s not found", intent["user_id"], intent["id"])
+        return {"ok": True, "ignored": "user missing"}
+    payment_info = {
+        "provider": "razorpay",
+        "order_id": order_id,
+        "payment_id": payment_id,
+        "amount_paise": intent["amount_paise"],
+        "amount_inr": intent["amount_inr"],
+        "paid_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await _fulfil_intent(intent, user, payment_info, source="webhook")
+    except HTTPException as exc:
+        # Refunded / in flight — Razorpay must not retry, so still 200.
+        return {"ok": True, "status": "not_fulfilled", "detail": exc.detail}
+    return {"ok": True, "status": "paid"}
 
 # ---------- Analytics ----------
 
@@ -2461,6 +2662,19 @@ async def organizer_analytics(user=Depends(require_role("organizer"))):
 @api_router.get("/")
 async def root():
     return {"message": "GatherSpace API", "status": "ok"}
+
+
+@api_router.get("/health")
+async def health():
+    """Deploy / uptime check: the API is up AND MongoDB answers."""
+    import asyncio
+    from fastapi.responses import JSONResponse
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=3)
+        return {"status": "ok", "db": "ok", "env": APP_ENV}
+    except Exception as exc:  # noqa: BLE001 — report, don't crash
+        log.error("Health check failed: %s", exc)
+        return JSONResponse(status_code=503, content={"status": "error", "db": "unreachable"})
 
 # Include the router in the main app
 app.include_router(api_router)

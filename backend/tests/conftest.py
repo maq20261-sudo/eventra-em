@@ -30,6 +30,15 @@ def _login(api, email, password, role=None):
     return r.json()
 
 
+@pytest.fixture
+def requires_payments():
+    """Skip tests that create Razorpay orders when keys aren't configured
+    (e.g. GitHub CI)."""
+    cfg = requests.get(f"{BASE_URL}/api/payments/config", timeout=15).json()
+    if not cfg.get("configured"):
+        pytest.skip("Razorpay not configured")
+
+
 @pytest.fixture(scope="session")
 def consumer(api):
     return _login(api, "demo@consumer.com", "password123", role="consumer")
