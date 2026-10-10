@@ -167,6 +167,8 @@ async def main():
             "organizer_name": "Aria Events Co.",
             "booked_count": 0,
             "seeded": True,
+            "status": "ACTIVE",
+            "hold_reasons": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
         await db.events.insert_one(e)

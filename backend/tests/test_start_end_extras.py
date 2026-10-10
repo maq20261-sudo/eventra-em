@@ -9,6 +9,8 @@ separate module so we can pace registers and dodge the /register 429 rate
 limit.
 """
 import os
+import sys
+from pathlib import Path
 import subprocess
 import time
 import uuid
@@ -17,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 
 def _headers(tok):
@@ -142,13 +144,13 @@ class TestMigrationIdempotent:
         # Run once to make sure DB is in migrated state.
         env = os.environ.copy()
         p1 = subprocess.run(
-            ["python", "/app/backend/migrations/002_start_end_date.py"],
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "migrations" / "002_start_end_date.py")],
             capture_output=True, text=True, timeout=60, env=env,
         )
         assert p1.returncode == 0, p1.stderr
         # Run again — should update 0.
         p2 = subprocess.run(
-            ["python", "/app/backend/migrations/002_start_end_date.py"],
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "migrations" / "002_start_end_date.py")],
             capture_output=True, text=True, timeout=60, env=env,
         )
         assert p2.returncode == 0, p2.stderr

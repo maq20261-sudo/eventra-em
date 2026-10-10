@@ -18,7 +18,7 @@ import requests
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 
 def _mock_token(uid: str, phone: str) -> str:

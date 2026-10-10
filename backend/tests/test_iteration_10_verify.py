@@ -1,5 +1,6 @@
 """Iteration 10 verification: per-slot capacity + payments + edit + legacy migration."""
 import os
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,7 +108,7 @@ class TestLegacyEventBookable:
         # Re-run migration (idempotent) — should back-fill this one legacy event
         import subprocess
         p = subprocess.run(
-            ["python", "/app/backend/migrations/001_time_slot_capacities.py"],
+            [sys.executable, str(Path(__file__).resolve().parents[1] / "migrations" / "001_time_slot_capacities.py")],
             capture_output=True, text=True,
         )
         assert p.returncode == 0, p.stderr

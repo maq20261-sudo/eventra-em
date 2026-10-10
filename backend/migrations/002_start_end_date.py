@@ -7,7 +7,7 @@ Per product decision:
 Idempotent: events that already have both fields are skipped.
 
 Usage:
-    python /app/backend/migrations/002_start_end_date.py
+    python backend/migrations/002_start_end_date.py
 """
 from __future__ import annotations
 

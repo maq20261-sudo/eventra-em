@@ -9,12 +9,13 @@ New behavior:
     - `event.slot_capacities` and `event.slots_info[i].remaining` reflect
       per-slot availability.
 """
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import requests
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 
 def _headers(tok):

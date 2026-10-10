@@ -2457,10 +2457,10 @@ _default_origins = [
 ]
 _env_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
 _allowed_origins = _env_origins or _default_origins
-# Match Expo/EAS preview URLs and Emergent preview subdomains via regex.
+# Match Expo/EAS preview URLs and our own domain via regex.
 _allowed_origin_regex = os.environ.get(
     "CORS_ORIGIN_REGEX",
-    r"^https://.*\.(preview\.emergentagent\.com|emergentagent\.com|exp\.direct|expo\.dev)$",
+    r"^https://(.*\.)?(gatherspace\.in|exp\.direct|expo\.dev)$",
 )
 app.add_middleware(
     CORSMiddleware,

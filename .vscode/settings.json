@@ -1,0 +1,27 @@
+{
+  // Backend: local venv (backend/.venv) gives IntelliSense; the API itself runs in Docker.
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": ["${workspaceFolder}/backend"],
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}/backend",
+  "python.testing.pytestArgs": ["tests", "-p", "no:cacheprovider"],
+  // Testing panel runs against the isolated test server (task "Backend: start test server").
+  "python.envFile": "${workspaceFolder}/.vscode/pytest.env",
+
+  // Frontend
+  "eslint.workingDirectories": ["frontend"],
+  "typescript.tsdk": "frontend/node_modules/typescript/lib",
+
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.venv": true,
+    "frontend/package-lock.json": true
+  },
+  "terminal.integrated.defaultProfile.windows": "PowerShell"
+}

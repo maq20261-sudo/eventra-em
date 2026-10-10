@@ -15,7 +15,7 @@ Idempotent: safe to re-run — events that already have `slot_capacities`
 are skipped.
 
 Usage:
-    python /app/backend/migrations/001_time_slot_capacities.py
+    python backend/migrations/001_time_slot_capacities.py
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure /app/backend is on the path so we can reuse server's Mongo client
+# Ensure backend/ is on the path so we can reuse server's Mongo client
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv

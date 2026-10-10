@@ -4,12 +4,13 @@
        availability). Two different consumers can book seat A1 in two
        different showings.
 """
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import requests
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 
 def _headers(tok):
