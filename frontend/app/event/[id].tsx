@@ -1,20 +1,25 @@
 import { useEffect, useState, useMemo } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-} from "react-native";
+import { View, StyleSheet, ScrollView } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
 import EventMap from "@/src/EventMap";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, shadows, fonts } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { eventDateRange } from "@/src/utils/eventDate";
-import { eventTypeLabel } from "@/src/utils/eventTypeLabel";
+import { eventTypeLabel, eventTypeIcon } from "@/src/utils/eventTypeLabel";
+import { urgencyOf, goingLabel, seatsLeft } from "@/src/utils/urgency";
+import { PressableScale } from "@/src/ui/PressableScale";
+import { Button } from "@/src/ui/Button";
+import { Tag } from "@/src/ui/Tag";
+import { Skeleton } from "@/src/ui/Skeleton";
+import { EmptyState } from "@/src/ui/EmptyState";
 
 export default function EventDetail() {
   const { colors } = useTheme();
@@ -48,8 +53,13 @@ export default function EventDetail() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator size="large" color={colors.brand} />
+      <View style={styles.container}>
+        <Skeleton height={320} radius={0} />
+        <View style={{ padding: 20, gap: 14 }}>
+          <Skeleton width="60%" height={22} />
+          <Skeleton height={72} radius={18} />
+          <Skeleton height={120} radius={18} />
+        </View>
       </View>
     );
   }
@@ -57,7 +67,13 @@ export default function EventDetail() {
   if (!event) {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={{ padding: spacing.xl }}>Event not found.</Text>
+        <EmptyState
+          icon="alert-circle-outline"
+          title="Event not found."
+          subtitle="It may have been removed or is no longer available."
+          actionLabel="Go back"
+          onAction={() => router.back()}
+        />
       </SafeAreaView>
     );
   }
@@ -77,50 +93,39 @@ export default function EventDetail() {
     : startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   const isOwner = user?.role === "organizer" && user?.id === event.organizer_id;
-
-  const primary = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/book/${event.id}` as any);
-  };
+  const urg = urgencyOf(event);
+  const going = goingLabel(event);
+  const left = seatsLeft(event);
+  const priceText = event.price > 0 ? `₹${event.price.toFixed(0)}` : "Free";
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>
-          <Image source={event.image_url} style={styles.hero} contentFit="cover" transition={200} />
+          <Image source={event.image_url} style={styles.hero} contentFit="cover" transition={250} />
           <LinearGradient
-            colors={["rgba(31,41,55,0.4)", "transparent", "rgba(31,41,55,0.7)"]}
+            colors={["rgba(13,11,26,0.55)", "rgba(13,11,26,0)", "rgba(13,11,26,0.92)"]}
+            locations={[0, 0.35, 1]}
             style={StyleSheet.absoluteFill}
           />
           <SafeAreaView edges={["top"]} style={styles.heroTop}>
-            <Pressable onPress={() => router.back()} style={styles.iconBtn} testID="event-back-btn">
-              <Ionicons name="chevron-back" size={22} color="#111827" />
-            </Pressable>
-            <View style={styles.categoryPill}>
-              <Text style={styles.categoryText}>{event.category}</Text>
-            </View>
+            <PressableScale onPress={() => router.back()} style={styles.iconBtn} testID="event-back-btn" accessibilityLabel="Back">
+              <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+            </PressableScale>
+            {urg ? <Tag label={urg.label} tone={urg.tone} style={{ marginTop: spacing.sm }} /> : null}
           </SafeAreaView>
           <View style={styles.heroBottom}>
-            <Text style={styles.heroTitle}>{event.title}</Text>
-            <View style={styles.heroMetaRow}>
-              <Ionicons name="location-outline" size={14} color="#FFFFFF" />
-              <Text style={styles.heroMeta}>{event.location_name}</Text>
+            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+              <Tag label={String(event.category).toUpperCase()} tone="lime" />
+              <Tag label={eventTypeLabel(event.booking_type)} tone="dark" icon={eventTypeIcon(event.booking_type) as any} />
+              {going ? <Tag label={going} tone="dark" icon="people" /> : null}
             </View>
+            <Text style={styles.heroTitle}>{event.title}</Text>
           </View>
         </View>
 
         <View style={styles.body}>
-          <View style={styles.dateCard}>
-            <View style={styles.dateIcon}>
-              <Ionicons name="calendar" size={20} color={colors.brand} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.dateTitle}>{sameDay ? dateStr : rangeStr}</Text>
-              <Text style={styles.dateSub}>{sameDay ? timeStr : `Ends ${endDate?.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</Text>
-            </View>
-          </View>
-
-          <View style={styles.orgRow}>
+          <Animated.View entering={FadeInDown.duration(350)} style={styles.orgRow}>
             <View style={styles.orgAvatar}>
               <Text style={styles.orgAvatarText}>{event.organizer_name?.charAt(0)}</Text>
             </View>
@@ -128,36 +133,47 @@ export default function EventDetail() {
               <Text style={styles.orgLabel}>Hosted by</Text>
               <Text style={styles.orgName}>{event.organizer_name}</Text>
             </View>
-          </View>
+          </Animated.View>
 
-          <Text style={styles.sectionTitle}>About</Text>
-          <Text style={styles.description}>{event.description}</Text>
-
-          <Text style={styles.sectionTitle}>Booking</Text>
-          <View style={styles.bookingInfo}>
-            <View style={styles.infoBlock}>
-              <Text style={styles.infoLabel}>Type</Text>
-              <Text style={styles.infoValue}>
-                {eventTypeLabel(event.booking_type)}
-              </Text>
+          <Animated.View entering={FadeInDown.delay(60).duration(350)} style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}><Ionicons name="calendar" size={18} color={colors.accentText} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>{sameDay ? dateStr : rangeStr}</Text>
+                <Text style={styles.infoSub}>{sameDay ? timeStr : `Ends ${endDate?.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</Text>
+              </View>
             </View>
-            <View style={styles.infoBlock}>
-              <Text style={styles.infoLabel}>Price</Text>
-              <Text style={styles.infoValue}>{event.price > 0 ? `₹${event.price.toFixed(0)}` : "Free"}</Text>
+            <View style={styles.divider} />
+            <View style={styles.infoRow}>
+              <View style={styles.infoIcon}><Ionicons name="pricetag" size={18} color={colors.lime} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>{priceText}{event.price > 0 ? " per ticket" : ""}</Text>
+                <Text style={styles.infoSub}>
+                  {eventTypeLabel(event.booking_type)}
+                  {left != null ? ` · ${left} ${left === 1 ? "spot" : "spots"} left` : ""}
+                </Text>
+              </View>
             </View>
-          </View>
+          </Animated.View>
 
-          <Text style={styles.sectionTitle}>Location</Text>
-          <View style={styles.locHeader}>
-            <Ionicons name="location" size={16} color={colors.brand} />
-            <Text style={styles.locName} numberOfLines={1}>{event.location_name}</Text>
-          </View>
-          <EventMap
-            latitude={event.latitude}
-            longitude={event.longitude}
-            label={event.location_name}
-            height={200}
-          />
+          <Animated.View entering={FadeInDown.delay(120).duration(350)} style={{ gap: spacing.sm }}>
+            <Text style={styles.sectionTitle}>About</Text>
+            <Text style={styles.description}>{event.description}</Text>
+          </Animated.View>
+
+          <Animated.View entering={FadeInDown.delay(180).duration(350)} style={{ gap: spacing.sm }}>
+            <Text style={styles.sectionTitle}>Location</Text>
+            <View style={styles.locHeader}>
+              <Ionicons name="location" size={16} color={colors.brand} />
+              <Text style={styles.locName} numberOfLines={2}>{event.location_name}</Text>
+            </View>
+            <EventMap
+              latitude={event.latitude}
+              longitude={event.longitude}
+              label={event.location_name}
+              height={180}
+            />
+          </Animated.View>
         </View>
       </ScrollView>
 
@@ -165,30 +181,26 @@ export default function EventDetail() {
         <View style={styles.stickyInner}>
           <View>
             <Text style={styles.stickyPriceLabel}>Starting at</Text>
-            <Text style={styles.stickyPrice}>
-              {event.price > 0 ? `₹${event.price.toFixed(0)}` : "Free"}
-            </Text>
+            <Text style={styles.stickyPrice}>{priceText}</Text>
           </View>
           {isOwner ? (
-            <Pressable
-              style={styles.cta}
+            <Button
+              title="Edit Event"
+              icon="create-outline"
               onPress={() => router.push(`/(organizer)/edit/${event.id}` as any)}
               testID="edit-event-btn"
-            >
-              <Text style={styles.ctaText}>Edit Event</Text>
-              <Ionicons name="create-outline" size={18} color={colors.onBrandPrimary} />
-            </Pressable>
+              style={{ flex: 1 }}
+            />
           ) : user?.role === "consumer" ? (
-            <Pressable style={styles.cta} onPress={primary} testID="book-now-btn">
-              <Text style={styles.ctaText}>
-                {event.booking_type === "seat_map" ? "Select Seats" : event.booking_type === "time_slot" ? "Pick Slot" : "Book Now"}
-              </Text>
-              <Ionicons name="arrow-forward" size={18} color={colors.onBrandPrimary} />
-            </Pressable>
+            <Button
+              title={event.booking_type === "seat_map" ? "Select Seats" : event.booking_type === "time_slot" ? "Pick Slot" : "Book Now"}
+              icon="arrow-forward"
+              onPress={() => router.push(`/book/${event.id}` as any)}
+              testID="book-now-btn"
+              style={{ flex: 1 }}
+            />
           ) : (
-            <Pressable style={[styles.cta, { opacity: 0.6 }]} disabled>
-              <Text style={styles.ctaText}>View Only</Text>
-            </Pressable>
+            <Button title="View Only" variant="ghost" disabled style={{ flex: 1 }} />
           )}
         </View>
       </SafeAreaView>
@@ -198,8 +210,10 @@ export default function EventDetail() {
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  center: { alignItems: "center", justifyContent: "center" },
-  heroWrap: { width: "100%", height: 340, backgroundColor: colors.surfaceTertiary },
+  heroWrap: {
+    width: "100%", height: 340, backgroundColor: colors.surfaceTertiary,
+    borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: "hidden",
+  },
   hero: { width: "100%", height: "100%" },
   heroTop: {
     position: "absolute", top: 0, left: 0, right: 0,
@@ -207,90 +221,46 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.95)",
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: "rgba(13,11,26,0.6)",
     alignItems: "center", justifyContent: "center",
     marginTop: spacing.sm,
   },
-  categoryPill: {
-    backgroundColor: "rgba(255,255,255,0.95)",
-    paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill,
-    marginTop: spacing.sm,
-  },
-  categoryText: { fontSize: 11, fontWeight: "600", color: "#111827" },
-  heroBottom: {
-    position: "absolute", bottom: spacing.xl, left: spacing.lg, right: spacing.lg,
-    gap: 6,
-  },
-  heroTitle: { fontSize: 28, fontWeight: "700", color: "#FFFFFF", lineHeight: 34 },
-  heroMetaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  heroMeta: { fontSize: 14, color: "#FFFFFF", opacity: 0.9 },
-  body: { padding: spacing.lg, gap: spacing.md },
-  dateCard: {
-    flexDirection: "row", alignItems: "center", gap: spacing.md,
-    backgroundColor: colors.surfaceSecondary, padding: spacing.md,
-    borderRadius: radius.md, ...shadows.card,
-  },
-  dateIcon: {
-    width: 44, height: 44, borderRadius: 12, backgroundColor: colors.brandTertiary,
-    alignItems: "center", justifyContent: "center",
-  },
-  dateTitle: { fontSize: 15, fontWeight: "600", color: colors.onSurface },
-  dateSub: { fontSize: 13, color: colors.muted, marginTop: 2 },
-  orgRow: {
-    flexDirection: "row", alignItems: "center", gap: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, ...shadows.card,
-  },
+  heroBottom: { position: "absolute", bottom: 20, left: 20, right: 20, gap: 10 },
+  heroTitle: { fontFamily: fonts.display, fontSize: 26, fontWeight: "800", color: "#FFFFFF", lineHeight: 32 },
+  body: { padding: 20, gap: 18 },
+  orgRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   orgAvatar: {
     width: 44, height: 44, borderRadius: 22,
-    backgroundColor: colors.onSurface,
+    backgroundColor: colors.violet,
     alignItems: "center", justifyContent: "center",
   },
-  orgAvatarText: { color: colors.surface, fontWeight: "700", fontSize: 16 },
+  orgAvatarText: { color: "#FFFFFF", fontWeight: "800", fontSize: 16 },
   orgLabel: { fontSize: 12, color: colors.muted },
-  orgName: { fontSize: 15, color: colors.onSurface, fontWeight: "600", marginTop: 2 },
-  sectionTitle: {
-    fontSize: 18, fontWeight: "700", color: colors.onSurface, marginTop: spacing.lg,
+  orgName: { fontSize: 15, color: colors.onSurface, fontWeight: "800", marginTop: 2 },
+  infoCard: {
+    backgroundColor: colors.surfaceSecondary, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border, paddingVertical: 4,
   },
-  description: { fontSize: 15, lineHeight: 22, color: colors.onSurfaceTertiary },
-  bookingInfo: {
-    flexDirection: "row", gap: spacing.md,
+  infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: 12 },
+  infoIcon: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: colors.surfaceTertiary,
+    alignItems: "center", justifyContent: "center",
   },
-  infoBlock: {
-    flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
-    padding: spacing.md, ...shadows.card,
-  },
-  infoLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
-  infoValue: { fontSize: 15, fontWeight: "600", color: colors.onSurface, marginTop: 4 },
-  mapCard: {
-    backgroundColor: colors.brandTertiary, borderRadius: radius.md, overflow: "hidden",
-    height: 140,
-  },
-  mapPreview: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
-  mapText: { fontSize: 15, color: colors.onBrandTertiary, fontWeight: "600" },
-  mapCoords: { fontSize: 12, color: colors.onBrandTertiary, opacity: 0.7 },
-  locHeader: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    marginTop: -spacing.xs,
-  },
-  locName: { flex: 1, fontSize: 14, color: colors.onSurface, fontWeight: "500" },
+  infoTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  infoSub: { fontSize: 13, color: colors.muted, marginTop: 2 },
+  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: 12 },
+  sectionTitle: { fontFamily: fonts.display, fontSize: 15, fontWeight: "700", color: colors.onSurface },
+  description: { fontSize: 14, lineHeight: 22, color: colors.soft },
+  locHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  locName: { flex: 1, fontSize: 14, color: colors.onSurface, fontWeight: "700" },
   stickyBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surface,
     borderTopColor: colors.border, borderTopWidth: 1,
     ...shadows.floating,
   },
-  stickyInner: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    padding: spacing.lg, gap: spacing.md,
-  },
+  stickyInner: { flexDirection: "row", alignItems: "center", padding: spacing.lg, gap: spacing.lg },
   stickyPriceLabel: { fontSize: 12, color: colors.muted },
-  stickyPrice: { fontSize: 22, fontWeight: "700", color: colors.onSurface, marginTop: 2 },
-  cta: {
-    backgroundColor: colors.brandPrimary, borderRadius: radius.pill,
-    paddingHorizontal: spacing.xl, paddingVertical: 14,
-    flexDirection: "row", alignItems: "center", gap: 6,
-  },
-  ctaText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 15 },
+  stickyPrice: { fontFamily: fonts.display, fontSize: 20, fontWeight: "800", color: colors.onSurface, marginTop: 2 },
 });

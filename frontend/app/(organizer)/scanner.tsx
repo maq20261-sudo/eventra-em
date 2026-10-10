@@ -1,12 +1,33 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Modal, Linking } from "react-native";
+import { View, StyleSheet, Pressable, ActivityIndicator, Modal, Linking } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import Animated, { Easing, FadeInDown, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
+import { softPop } from "@/src/ui/motion";
+import { GlowBackground } from "@/src/ui/GlowBackground";
+import { Confetti } from "@/src/ui/Confetti";
+import { Button } from "@/src/ui/Button";
+import { PressableScale } from "@/src/ui/PressableScale";
+
+/** Lime scan line sweeping the viewfinder. */
+function ScanLine() {
+  const y = useSharedValue(0);
+  useEffect(() => {
+    y.value = withRepeat(withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.quad) }), -1, true);
+  }, [y]);
+  const style = useAnimatedStyle(() => ({ transform: [{ translateY: 20 + y.value * 220 }] }));
+  return (
+    <Animated.View
+      style={[{ position: "absolute", left: 22, right: 22, top: 0, height: 3, borderRadius: 2, backgroundColor: "#C6FF3D", shadowColor: "#C6FF3D", shadowOpacity: 0.9, shadowRadius: 12, shadowOffset: { width: 0, height: 0 }, elevation: 6 }, style]}
+    />
+  );
+}
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { ticketTypeLine } from "@/src/utils/ticketLabel";
 
@@ -130,7 +151,8 @@ export default function Scanner() {
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={["top", "bottom"]}>
+        <GlowBackground />
         <View style={styles.header}>
           <Pressable style={styles.iconBtn} onPress={() => router.back()} testID="scanner-back-btn">
             <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
@@ -140,20 +162,16 @@ export default function Scanner() {
         </View>
         <View style={styles.permWrap}>
           <View style={styles.permIcon}>
-            <Ionicons name="camera" size={40} color={colors.brand} />
+            <Ionicons name="camera" size={40} color={colors.accentText} />
           </View>
           <Text style={styles.permTitle}>Camera access needed</Text>
           <Text style={styles.permSub}>
             Grant camera permission to scan attendee tickets at your event entrance.
           </Text>
           {permission.canAskAgain ? (
-            <Pressable style={styles.permBtn} onPress={requestPermission} testID="grant-camera-btn">
-              <Text style={styles.permBtnText}>Grant Access</Text>
-            </Pressable>
+            <Button title="Grant Access" icon="camera" onPress={requestPermission} testID="grant-camera-btn" style={{ alignSelf: "stretch", marginTop: spacing.md }} />
           ) : (
-            <Pressable style={styles.permBtn} onPress={() => Linking.openSettings()} testID="open-settings-btn">
-              <Text style={styles.permBtnText}>Open Settings</Text>
-            </Pressable>
+            <Button title="Open Settings" icon="settings-outline" onPress={() => Linking.openSettings()} testID="open-settings-btn" style={{ alignSelf: "stretch", marginTop: spacing.md }} />
           )}
         </View>
       </SafeAreaView>
@@ -206,6 +224,7 @@ export default function Scanner() {
           <View style={[styles.corner, styles.tr]} />
           <View style={[styles.corner, styles.bl]} />
           <View style={[styles.corner, styles.br]} />
+          {scanning && !preview ? <ScanLine /> : null}
         </View>
         <Text style={styles.frameHint}>Point at attendee&apos;s QR code</Text>
       </View>
@@ -225,9 +244,9 @@ export default function Scanner() {
           <View style={styles.verifyCard}>
             {previewInvalid ? (
               <>
-                <View style={[styles.resultIcon, { backgroundColor: colors.error }]}>
-                  <Ionicons name="close" size={40} color="#FFFFFF" />
-                </View>
+                <Animated.View entering={softPop()} style={[styles.resultIcon, { backgroundColor: colors.error + "29" }]}>
+                  <Ionicons name="close" size={40} color={colors.error} />
+                </Animated.View>
                 <Text style={styles.resultTitle}>Not Valid</Text>
                 <Text style={styles.errorText}>{preview?.error}</Text>
                 <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-again-btn">
@@ -237,9 +256,9 @@ export default function Scanner() {
               </>
             ) : preview?.cancelled ? (
               <>
-                <View style={[styles.resultIcon, { backgroundColor: colors.error }]}>
-                  <Ionicons name="ban" size={36} color="#FFFFFF" />
-                </View>
+                <Animated.View entering={softPop()} style={[styles.resultIcon, { backgroundColor: colors.error + "29" }]}>
+                  <Ionicons name="ban" size={36} color={colors.error} />
+                </Animated.View>
                 <Text style={styles.resultTitle}>Booking Cancelled</Text>
                 <Text style={styles.resultSub}>This ticket was cancelled and cannot be used.</Text>
                 <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-again-btn">
@@ -251,24 +270,24 @@ export default function Scanner() {
               <>
                 {/* Status hero */}
                 {preview?.already_checked_in ? (
-                  <View style={[styles.statusHero, { backgroundColor: colors.warning }]}>
-                    <Ionicons name="alert-circle" size={22} color="#FFFFFF" />
-                    <Text style={styles.statusHeroText}>Already Checked In</Text>
+                  <View style={[styles.statusHero, { backgroundColor: colors.warning + "26", borderColor: colors.warning + "66" }]}>
+                    <Ionicons name="alert-circle" size={22} color={colors.warning} />
+                    <Text style={[styles.statusHeroText, { color: colors.warning }]}>Already Checked In</Text>
                   </View>
                 ) : isPaid ? (
-                  <View style={[styles.statusHero, { backgroundColor: "#059669" }]}>
-                    <Ionicons name="shield-checkmark" size={22} color="#FFFFFF" />
-                    <Text style={styles.statusHeroText}>Paid Online</Text>
+                  <View style={[styles.statusHero, { backgroundColor: colors.success + "24", borderColor: colors.success + "66" }]}>
+                    <Ionicons name="shield-checkmark" size={22} color={colors.success} />
+                    <Text style={[styles.statusHeroText, { color: colors.success }]}>Paid Online</Text>
                   </View>
                 ) : owesMoney ? (
-                  <View style={[styles.statusHero, { backgroundColor: "#D97706" }]}>
-                    <Ionicons name="wallet" size={22} color="#FFFFFF" />
-                    <Text style={styles.statusHeroText}>Payment Pending</Text>
+                  <View style={[styles.statusHero, { backgroundColor: colors.warning + "26", borderColor: colors.warning + "66" }]}>
+                    <Ionicons name="wallet" size={22} color={colors.warning} />
+                    <Text style={[styles.statusHeroText, { color: colors.warning }]}>Payment Pending</Text>
                   </View>
                 ) : (
-                  <View style={[styles.statusHero, { backgroundColor: "#059669" }]}>
-                    <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-                    <Text style={styles.statusHeroText}>Free Ticket</Text>
+                  <View style={[styles.statusHero, { backgroundColor: colors.success + "24", borderColor: colors.success + "66" }]}>
+                    <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                    <Text style={[styles.statusHeroText, { color: colors.success }]}>Free Ticket</Text>
                   </View>
                 )}
 
@@ -276,7 +295,7 @@ export default function Scanner() {
 
                 {preview?.booking?.time_slot && (
                   <View style={styles.slotHighlight} testID="scan-slot-banner">
-                    <Ionicons name="time" size={18} color={colors.onBrandPrimary} />
+                    <Ionicons name="time" size={18} color={colors.accentText} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.slotHighlightLabel}>Time slot</Text>
                       <Text style={styles.slotHighlightValue} numberOfLines={1}>
@@ -289,7 +308,7 @@ export default function Scanner() {
 
                 <View style={styles.rowBlock}>
                   <View style={styles.rowIcon}>
-                    <Ionicons name="person" size={16} color={colors.brand} />
+                    <Ionicons name="person" size={16} color={colors.accentText} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowLabel}>Attendee</Text>
@@ -304,7 +323,7 @@ export default function Scanner() {
 
                 <View style={styles.rowBlock}>
                   <View style={styles.rowIcon}>
-                    <Ionicons name={ttype.icon} size={16} color={colors.brand} />
+                    <Ionicons name={ttype.icon as any} size={16} color={colors.accentText} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowLabel}>Ticket type</Text>
@@ -315,7 +334,7 @@ export default function Scanner() {
                 {price > 0 && (
                   <View style={styles.rowBlock}>
                     <View style={styles.rowIcon}>
-                      <Ionicons name="cash" size={16} color={colors.brand} />
+                      <Ionicons name="cash" size={16} color={colors.accentText} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.rowLabel}>Amount</Text>
@@ -331,7 +350,7 @@ export default function Scanner() {
 
                 {owesMoney && (
                   <View style={styles.collectBanner}>
-                    <Ionicons name="alert-circle" size={16} color="#92400E" />
+                    <Ionicons name="alert-circle" size={16} color={colors.warning} />
                     <Text style={styles.collectText}>
                       Collect ₹{price.toFixed(0)} at the gate before confirming entry
                     </Text>
@@ -387,92 +406,89 @@ export default function Scanner() {
         </View>
       </Modal>
 
-      {/* Success (post check-in) modal */}
-      <Modal visible={!!confirmed} transparent animationType="fade" onRequestClose={scanNext}>
-        <View style={styles.modalBg}>
-          <View style={styles.successCard}>
-            <View style={styles.successIcon}>
-              <Ionicons name="checkmark" size={40} color="#FFFFFF" />
-            </View>
-            <Text style={styles.successTitle}>Welcome!</Text>
-            <Text style={styles.successSub}>{confirmed?.event_title}</Text>
-            {confirmed?.attendee_name && (
-              <View style={styles.attendeeRow}>
-                <Ionicons name="person-outline" size={16} color={colors.onSurfaceTertiary} />
-                <Text style={styles.attendeeName}>{confirmed.attendee_name}</Text>
-              </View>
-            )}
+      {/* Success (post check-in) — full-screen celebration */}
+      <Modal visible={!!confirmed} animationType="fade" onRequestClose={scanNext} statusBarTranslucent>
+        <SafeAreaView style={styles.successScreen}>
+          <GlowBackground variant="success" />
+          {confirmed ? <Confetti count={40} /> : null}
+          <View style={styles.successBody}>
+            <Animated.View entering={softPop()} style={styles.successIcon}>
+              <Ionicons name="checkmark" size={56} color={colors.onLime} />
+            </Animated.View>
+            <Animated.Text entering={FadeInDown.delay(150)} style={styles.successTitle}>Welcome!</Animated.Text>
+            {confirmed?.attendee_name ? (
+              <Animated.Text entering={FadeInDown.delay(220)} style={styles.attendeeName}>{confirmed.attendee_name}</Animated.Text>
+            ) : null}
+            <Animated.Text entering={FadeInDown.delay(260)} style={styles.successSub}>{confirmed?.event_title}</Animated.Text>
             {confirmed?.booking?.time_slot && (
               <View style={styles.slotSuccessBanner} testID="success-slot-banner">
-                <Ionicons name="time" size={16} color={colors.brand} />
+                <Ionicons name="time" size={16} color={colors.accentText} />
                 <Text style={styles.slotSuccessText}>
                   {confirmed.booking.time_slot}
                   {confirmed.booking.num_seats > 1 ? `  ·  ${confirmed.booking.num_seats} seats` : ""}
                 </Text>
               </View>
             )}
-            <Pressable style={styles.primaryBtn} onPress={scanNext} testID="scan-next-btn">
-              <Ionicons name="scan" size={16} color={colors.onBrandPrimary} />
-              <Text style={styles.primaryBtnText}>Scan next ticket</Text>
-            </Pressable>
+            <View style={styles.checkedTag}>
+              <Text style={styles.checkedTagText}>CHECKED IN · {new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</Text>
+            </View>
           </View>
-        </View>
+          <View style={{ padding: 20 }}>
+            <Button title="Scan next ticket" icon="scan" variant="lime" onPress={scanNext} testID="scan-next-btn" />
+          </View>
+        </SafeAreaView>
       </Modal>
     </View>
   );
 }
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surfaceInverse },
+  container: { flex: 1, backgroundColor: "#05040C" },
   center: { alignItems: "center", justifyContent: "center" },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
-  headerTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface },
-  headerTitleLight: { fontSize: 18, fontWeight: "600", color: "#FFFFFF" },
+  headerTitle: { fontFamily: fonts.display, fontSize: 16, fontWeight: "700", color: colors.onSurface },
+  headerTitleLight: { fontFamily: fonts.display, fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
   iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 44, height: 44, borderRadius: 14,
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center", justifyContent: "center",
   },
   iconBtnDark: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: "rgba(13,11,26,0.6)",
     alignItems: "center", justifyContent: "center",
   },
   overlayTop: { position: "absolute", top: 0, left: 0, right: 0 },
 
   permWrap: { flex: 1, padding: spacing.xl, alignItems: "center", justifyContent: "center", gap: spacing.md },
   permIcon: {
-    width: 88, height: 88, borderRadius: 44,
-    backgroundColor: colors.brandTertiary,
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1, borderColor: colors.border,
     alignItems: "center", justifyContent: "center", marginBottom: spacing.md,
+    ...shadows.glow,
   },
-  permTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
-  permSub: { fontSize: 14, color: colors.muted, textAlign: "center" },
-  permBtn: {
-    marginTop: spacing.md, backgroundColor: colors.brandPrimary,
-    paddingHorizontal: spacing.xl, paddingVertical: 14, borderRadius: radius.pill,
-  },
-  permBtnText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+  permTitle: { fontFamily: fonts.display, fontSize: 19, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  permSub: { fontSize: 14, color: colors.soft, textAlign: "center", lineHeight: 20 },
 
   frameWrap: {
     position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-    alignItems: "center", justifyContent: "center", gap: spacing.lg,
+    alignItems: "center", justifyContent: "center", gap: spacing.xl,
   },
-  frame: { width: 260, height: 260, borderRadius: radius.lg },
-  corner: {
-    position: "absolute", width: 40, height: 40, borderColor: colors.brandPrimary, borderWidth: 4,
-  },
-  tl: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: radius.md },
-  tr: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: radius.md },
-  bl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: radius.md },
-  br: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: radius.md },
+  frame: { width: 264, height: 264 },
+  corner: { position: "absolute", width: 56, height: 56, borderColor: colors.brandPrimary, borderWidth: 5 },
+  tl: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 24 },
+  tr: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 24 },
+  bl: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 24 },
+  br: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 24 },
   frameHint: {
-    color: "#FFFFFF", fontSize: 14,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill,
+    color: "#FFFFFF", fontSize: 14, fontWeight: "700",
+    backgroundColor: "rgba(13,11,26,0.7)",
+    paddingHorizontal: spacing.lg, paddingVertical: 10, borderRadius: radius.pill,
+    overflow: "hidden",
   },
 
   loadingOverlay: {
@@ -481,126 +497,112 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   loadingCard: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.sheet, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: spacing.lg, paddingVertical: 12, borderRadius: radius.pill,
     ...shadows.floating,
   },
-  loadingText: { color: colors.onSurface, fontWeight: "600", fontSize: 14 },
+  loadingText: { color: colors.onSurface, fontWeight: "700", fontSize: 14 },
 
   modalBg: {
-    flex: 1, backgroundColor: "rgba(17,24,39,0.6)",
+    flex: 1, backgroundColor: colors.overlay,
     alignItems: "center", justifyContent: "center", padding: spacing.xl,
   },
   verifyCard: {
-    width: "100%", backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg, padding: spacing.xl,
-    gap: spacing.sm, ...shadows.floating,
+    width: "100%", backgroundColor: colors.sheet,
+    borderRadius: 24, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.xl, gap: spacing.sm, ...shadows.floating,
   },
   statusHero: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
-    paddingVertical: 14, borderRadius: radius.md,
+    paddingVertical: 14, borderRadius: 16, borderWidth: 1,
     marginBottom: spacing.sm,
   },
-  statusHeroText: {
-    color: "#FFFFFF", fontSize: 18, fontWeight: "700", letterSpacing: 0.3,
-  },
-  eventTitle: {
-    fontSize: 15, fontWeight: "600", color: colors.onSurface,
-    textAlign: "center", marginBottom: spacing.sm,
-  },
+  statusHeroText: { fontFamily: fonts.display, fontSize: 16, fontWeight: "700" },
+  eventTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, textAlign: "center", marginBottom: spacing.sm },
   rowBlock: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    backgroundColor: colors.surfaceTertiary,
-    padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, borderRadius: 16,
   },
   rowIcon: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: colors.brandTertiary,
+    width: 34, height: 34, borderRadius: 11,
+    backgroundColor: colors.surfaceTertiary,
     alignItems: "center", justifyContent: "center",
   },
-  rowLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
-  rowValue: { fontSize: 15, color: colors.onSurface, fontWeight: "600", marginTop: 2 },
-  rowSub: { fontSize: 12, color: colors.onSurfaceTertiary, marginTop: 2 },
-
+  rowLabel: { fontSize: 10, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: "700" },
+  rowValue: { fontSize: 15, color: colors.onSurface, fontWeight: "800", marginTop: 2 },
+  rowSub: { fontSize: 12, color: colors.soft, marginTop: 2 },
   collectBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#FEF3C7",
-    padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.warning + "1F", borderWidth: 1, borderColor: colors.warning + "55",
+    padding: spacing.md, borderRadius: 14,
     marginTop: spacing.xs,
   },
-  collectText: { color: "#92400E", fontSize: 13, fontWeight: "600", flex: 1 },
-  checkedInHint: {
-    fontSize: 13, color: colors.muted, textAlign: "center",
-    marginTop: spacing.xs,
-  },
-
-  actionsRow: {
-    flexDirection: "row", gap: spacing.sm, marginTop: spacing.md,
-  },
+  collectText: { color: colors.warning, fontSize: 13, fontWeight: "800", flex: 1 },
+  checkedInHint: { fontSize: 13, color: colors.muted, textAlign: "center", marginTop: spacing.xs },
+  actionsRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
   primaryBtn: {
     backgroundColor: colors.brandPrimary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.xl, paddingVertical: 14,
+    borderRadius: 16, height: 52,
+    paddingHorizontal: spacing.xl,
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     alignSelf: "stretch",
   },
   primaryBtnFlex: { flex: 1, paddingHorizontal: spacing.md },
-  primaryBtnText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: 16 },
+  primaryBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 15 },
   secondaryBtn: {
     backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.xl, paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 16, height: 52,
+    paddingHorizontal: spacing.xl,
     alignItems: "center", justifyContent: "center",
     minWidth: 100,
   },
-  secondaryBtnText: { color: colors.onSurface, fontWeight: "600", fontSize: 15 },
+  secondaryBtnText: { color: colors.onSurface, fontWeight: "800", fontSize: 15 },
+  errorText: { color: colors.error, fontSize: 14, textAlign: "center", marginTop: 4, fontWeight: "600" },
 
-  errorText: { color: colors.error, fontSize: 14, textAlign: "center", marginTop: 4 },
-
-  // Success modal
-  successCard: {
-    width: "100%", backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg, padding: spacing.xl,
-    alignItems: "center", gap: spacing.sm, ...shadows.floating,
-  },
-  successIcon: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: colors.brandPrimary,
-    alignItems: "center", justifyContent: "center", marginBottom: spacing.md,
-  },
-  successTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface },
-  successSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
-  attendeeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.sm },
-  attendeeName: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
   slotHighlight: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    backgroundColor: colors.brandPrimary,
-    borderRadius: radius.md,
+    backgroundColor: colors.brand + "1F", borderWidth: 1, borderColor: colors.brand + "66",
+    borderRadius: 16,
     paddingHorizontal: spacing.md, paddingVertical: 12,
-    marginTop: spacing.md,
+    marginBottom: spacing.xs,
   },
-  slotHighlightLabel: {
-    fontSize: 11, color: colors.onBrandPrimary, opacity: 0.85,
-    letterSpacing: 0.5, textTransform: "uppercase", fontWeight: "600",
-  },
-  slotHighlightValue: {
-    fontSize: 16, color: colors.onBrandPrimary, fontWeight: "700", marginTop: 2,
-  },
-  slotSuccessBanner: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: colors.brandTertiary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md, paddingVertical: 6,
-    marginTop: spacing.sm,
-  },
-  slotSuccessText: { fontSize: 13, color: colors.brand, fontWeight: "600" },
+  slotHighlightLabel: { fontSize: 10, color: colors.accentText, letterSpacing: 0.8, textTransform: "uppercase", fontWeight: "800" },
+  slotHighlightValue: { fontSize: 16, color: colors.onSurface, fontWeight: "800", marginTop: 2 },
   resultIcon: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: colors.brandPrimary,
+    width: 80, height: 80, borderRadius: 40,
     alignItems: "center", justifyContent: "center",
     alignSelf: "center",
     marginBottom: spacing.md,
   },
-  resultTitle: { fontSize: 22, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
-  resultSub: { fontSize: 15, color: colors.muted, textAlign: "center" },
+  resultTitle: { fontFamily: fonts.display, fontSize: 20, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  resultSub: { fontSize: 15, color: colors.soft, textAlign: "center" },
+
+  // Success (full screen)
+  successScreen: { flex: 1, backgroundColor: colors.surface },
+  successBody: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, gap: 10 },
+  successIcon: {
+    width: 120, height: 120, borderRadius: 60,
+    backgroundColor: colors.lime,
+    alignItems: "center", justifyContent: "center", marginBottom: spacing.lg,
+    shadowColor: colors.lime, shadowOpacity: 0.55, shadowRadius: 34, shadowOffset: { width: 0, height: 10 }, elevation: 14,
+  },
+  successTitle: { fontFamily: "Unbounded_800ExtraBold", fontSize: 32, color: colors.onSurface },
+  attendeeName: { fontFamily: "Unbounded_700Bold", fontSize: 18, color: colors.onSurface, textAlign: "center" },
+  successSub: { fontFamily: "Manrope_600SemiBold", fontSize: 14, color: colors.muted, textAlign: "center" },
+  slotSuccessBanner: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    marginTop: spacing.sm,
+  },
+  slotSuccessText: { fontSize: 13, color: colors.onSurface, fontWeight: "800" },
+  checkedTag: {
+    marginTop: spacing.md, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill,
+    backgroundColor: colors.lime + "24",
+  },
+  checkedTagText: { color: colors.lime, fontSize: 12, fontWeight: "800", letterSpacing: 0.6 },
 });

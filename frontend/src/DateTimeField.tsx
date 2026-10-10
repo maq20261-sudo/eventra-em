@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, Pressable, Platform, Modal, TextInput } from "react-native";
+import { View, StyleSheet, Pressable, Platform, Modal } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";

@@ -1,22 +1,13 @@
 import { useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
-  Modal,
-} from "react-native";
+import { View, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Modal } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { useRouter, useLocalSearchParams, Link } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/src/AuthContext";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
 export default function Login() {
@@ -72,6 +63,7 @@ export default function Login() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <GlowBackground />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Pressable onPress={() => router.back()} style={styles.back} testID="back-btn">
@@ -219,18 +211,18 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.xl, paddingTop: spacing.lg, flexGrow: 1 },
   back: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 44, height: 44, borderRadius: 14,
     backgroundColor: colors.surfaceSecondary,
     alignItems: "center", justifyContent: "center",
-    marginBottom: spacing.lg, ...shadows.card,
+    marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.border,
   },
-  title: { fontSize: 32, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.xs },
+  title: { fontFamily: fonts.display, fontSize: 26, fontWeight: "800", lineHeight: 34, color: colors.onSurface, marginBottom: spacing.xs },
   subtitle: { fontSize: 16, color: colors.muted, marginBottom: spacing.xl },
   field: { marginBottom: spacing.lg },
-  label: { fontSize: 13, color: colors.onSurfaceTertiary, marginBottom: spacing.xs, fontWeight: "500" },
+  label: { fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
   input: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md,
+    borderRadius: 16,
     paddingHorizontal: spacing.lg,
     paddingVertical: 14,
     fontSize: 16,
@@ -246,23 +238,25 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   error: {
     color: colors.error, fontSize: 14, marginBottom: spacing.md,
-    backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.error + "1A", borderWidth: 1, borderColor: colors.error + "55", padding: spacing.md, borderRadius: 16,
   },
   primaryBtn: {
+    ...shadows.glow,
+    minHeight: 54, justifyContent: "center",
     backgroundColor: colors.brandPrimary,
-    borderRadius: radius.pill,
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
     marginTop: spacing.sm,
   },
-  primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "600" },
+  primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "800" },
   forgotBtn: {
     marginTop: spacing.md,
     alignItems: "center",
     paddingVertical: 12,
   },
   forgotText: {
-    color: colors.brand,
+    color: colors.accentText,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -271,20 +265,19 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     flexDirection: "row", justifyContent: "center", gap: 6, paddingTop: spacing.xl,
   },
   footerText: { color: colors.muted, fontSize: 14 },
-  footerLink: { color: colors.brand, fontSize: 14, fontWeight: "600" },
+  footerLink: { color: colors.accentText, fontSize: 14, fontWeight: "600" },
 
   // Role picker modal
   modalBackdrop: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.55)",
+    flex: 1, backgroundColor: colors.overlay,
     justifyContent: "center", alignItems: "center", paddingHorizontal: spacing.xl,
   },
   modalCard: {
     width: "100%",
-    backgroundColor: colors.surface,
+    backgroundColor: colors.sheet, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.lg,
     padding: spacing.xl,
     alignItems: "center",
-    ...shadows.card,
   },
   modalIconWrap: {
     width: 64, height: 64, borderRadius: 32,
@@ -303,7 +296,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 12,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    borderRadius: radius.md,
+    borderRadius: 16,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1, borderColor: colors.border,
   },

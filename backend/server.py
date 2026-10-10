@@ -1008,10 +1008,22 @@ async def places_reverse(body: Dict[str, Any], user=Depends(get_current_user)):
     if not results:
         return {"formatted_address": None, "name": None}
     top = results[0]
+
+    def _component(*types: str) -> Optional[str]:
+        # First address component (across all results) matching any type.
+        for res in results:
+            for comp in res.get("address_components") or []:
+                if any(t in (comp.get("types") or []) for t in types):
+                    return comp.get("long_name")
+        return None
+
     return {
         "formatted_address": top.get("formatted_address"),
         # A short name — first component (e.g. building/POI).
         "name": (top.get("address_components") or [{}])[0].get("long_name"),
+        # Human area label for "events near ..." headers, e.g. "Bandra West", "Mumbai".
+        "area": _component("sublocality_level_1", "sublocality", "neighborhood"),
+        "city": _component("locality", "administrative_area_level_2"),
     }
 
 
@@ -1889,9 +1901,9 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
 # ---------- Feature/Boost ----------
 
 FEATURE_TIERS = {
-    "24h": {"hours": 24, "price": 99, "label": "1 Day Boost"},
-    "7d": {"hours": 24 * 7, "price": 299, "label": "7 Day Boost"},
-    "30d": {"hours": 24 * 30, "price": 799, "label": "30 Day Boost"},
+    "24h": {"hours": 24, "price": 9, "label": "1 Day Boost"},
+    "7d": {"hours": 24 * 7, "price": 49, "label": "7 Day Boost"},
+    "30d": {"hours": 24 * 30, "price": 99, "label": "30 Day Boost"},
 }
 
 class BoostRequest(BaseModel):
@@ -2109,6 +2121,12 @@ async def pricing_config():
         "organizer_platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
         "attendee_free_booking_limit": ATTENDEE_FREE_BOOKING_LIMIT,
         "organizer_free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
+        # Boost prices are the single source of truth for the app's Boost
+        # sheet — never hardcode them client-side (they drifted once).
+        "boost_tiers": [
+            {"key": k, "price_inr": v["price"], "hours": v["hours"], "label": v["label"]}
+            for k, v in FEATURE_TIERS.items()
+        ],
     }
 
 

@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Pressable, ScrollView, Switch } from "react-native";
+import { View, StyleSheet, Pressable, ScrollView, Switch } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -6,8 +7,12 @@ import * as Haptics from "expo-haptics";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/src/AuthContext";
 import { useTheme, type Colors } from "@/src/ThemeContext";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, fonts } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import { GlowBackground } from "@/src/ui/GlowBackground";
+import { Button } from "@/src/ui/Button";
+import { Tag } from "@/src/ui/Tag";
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -47,27 +52,30 @@ export default function Profile() {
   };
 
   const initial = user?.name?.charAt(0).toUpperCase() || "U";
+  const isOrganizer = user?.role === "organizer";
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <GlowBackground />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Profile</Text>
 
-        <View style={styles.card}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initial}</Text>
+        <Animated.View entering={FadeInDown.duration(350)} style={styles.card}>
+          <GlowBackground variant={isOrganizer ? "violet" : "default"} />
+          <View style={[styles.avatar, { backgroundColor: isOrganizer ? colors.violet : colors.brand }]}>
+            <Text style={[styles.avatarText, { color: isOrganizer ? "#FFFFFF" : colors.onBrandPrimary }]}>{initial}</Text>
           </View>
-          <Text style={styles.name}>{user?.name}</Text>
-          <Text style={styles.email}>{user?.email}</Text>
-          <View style={styles.roleBadge}>
-            <Ionicons
-              name={user?.role === "organizer" ? "star" : "ticket"}
-              size={12}
-              color={colors.onBrandTertiary}
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={styles.name} numberOfLines={1}>{user?.name}</Text>
+            <Text style={styles.email} numberOfLines={1}>{user?.email}</Text>
+            <Tag
+              label={isOrganizer ? "Organizer" : "Attendee"}
+              tone={isOrganizer ? "lime" : "violet"}
+              icon={isOrganizer ? "star" : "ticket"}
+              style={{ marginTop: 4 }}
             />
-            <Text style={styles.roleText}>{user?.role === "organizer" ? "Organizer" : "Attendee"}</Text>
           </View>
-        </View>
+        </Animated.View>
 
         <View style={styles.section}>
           {/* Appearance */}
@@ -85,8 +93,8 @@ export default function Profile() {
               testID="theme-toggle"
               value={mode === "dark"}
               onValueChange={() => { Haptics.selectionAsync(); toggleMode(); }}
-              thumbColor={mode === "dark" ? colors.brand : colors.borderStrong}
-              trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+              thumbColor="#FFFFFF"
+              trackColor={{ true: colors.brand, false: colors.borderStrong }}
             />
           </View>
 
@@ -157,7 +165,7 @@ export default function Profile() {
               <FAQ styles={styles} q="How do I pay for a ticket?" a="Paid events accept online payments via Razorpay (UPI, cards, netbanking, wallets). Free events don't require any payment." />
               <FAQ styles={styles} q="Can I cancel a booking?" a="Yes — open the ticket from My Tickets and tap Cancel. Cancellations are allowed up to 2 hours before event start. Paid tickets get a full refund to the original payment method within 5-7 business days." />
               <FAQ styles={styles} q="Why is my event not appearing on Discover?" a="Events only show within the attendee's chosen radius. Organizers can also boost an event to feature it at the top of results." />
-              <FAQ styles={styles} q="Contact us" a="support@gatherspace.app · Mon–Fri, 10am–7pm IST" last />
+              <FAQ styles={styles} q="Contact us" a="support@gatherspace.in · Mon–Fri, 10am–7pm IST" last />
             </View>
           )}
 
@@ -181,10 +189,7 @@ export default function Profile() {
           )}
         </View>
 
-        <Pressable style={styles.signOut} onPress={doSignOut} testID="sign-out-btn">
-          <Ionicons name="log-out-outline" size={18} color={colors.error} />
-          <Text style={styles.signOutText}>Sign out</Text>
-        </Pressable>
+        <Button title="Sign out" variant="danger" icon="log-out-outline" onPress={doSignOut} testID="sign-out-btn" />
       </ScrollView>
     </SafeAreaView>
   );
@@ -201,8 +206,8 @@ function SubRow({ styles, label, sub, value, onChange, last }: { styles: any; la
       <Switch
         value={value}
         onValueChange={onChange}
-        thumbColor={value ? colors.brand : colors.borderStrong}
-        trackColor={{ true: colors.brandTertiary, false: colors.surfaceTertiary }}
+        thumbColor="#FFFFFF"
+        trackColor={{ true: colors.brand, false: colors.borderStrong }}
       />
     </View>
   );
@@ -219,79 +224,70 @@ function FAQ({ styles, q, a, last }: { styles: any; q: string; a: string; last?:
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  content: { padding: spacing.lg, gap: spacing.lg },
-  title: { fontSize: 28, fontWeight: "700", color: colors.onSurface, marginBottom: spacing.sm },
+  content: { padding: 20, gap: spacing.lg, paddingBottom: 32 },
+  title: { fontFamily: fonts.display, fontSize: 26, fontWeight: "800", color: colors.onSurface },
   card: {
-    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg,
-    padding: spacing.xl, alignItems: "center", gap: 6, ...shadows.card,
+    flexDirection: "row", alignItems: "center", gap: 14,
+    backgroundColor: colors.surfaceSecondary, borderRadius: 22,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.lg, overflow: "hidden",
   },
   avatar: {
-    width: 80, height: 80, borderRadius: 40, backgroundColor: colors.brandTertiary,
-    alignItems: "center", justifyContent: "center", marginBottom: spacing.sm,
+    width: 60, height: 60, borderRadius: 30,
+    alignItems: "center", justifyContent: "center",
   },
-  avatarText: { fontSize: 30, fontWeight: "700", color: colors.onBrandTertiary },
-  name: { fontSize: 20, fontWeight: "600", color: colors.onSurface },
-  email: { fontSize: 14, color: colors.muted },
-  roleBadge: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: colors.brandTertiary,
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill,
-    marginTop: spacing.sm,
-  },
-  roleText: { fontSize: 11, color: colors.onBrandTertiary, fontWeight: "600" },
+  avatarText: { fontFamily: fonts.display, fontSize: 22, fontWeight: "800" },
+  name: { fontFamily: fonts.display, fontSize: 17, fontWeight: "700", color: colors.onSurface },
+  email: { fontSize: 13, color: colors.muted },
   section: {
-    backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, ...shadows.card,
+    backgroundColor: colors.surfaceSecondary, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border,
     overflow: "hidden",
   },
   row: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: spacing.lg, paddingVertical: 14,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    paddingHorizontal: spacing.lg, minHeight: 60,
+    borderBottomColor: colors.border, borderBottomWidth: 1,
   },
   rowLast: { borderBottomWidth: 0 },
   rowLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   rowIcon: {
-    width: 32, height: 32, borderRadius: 8,
+    width: 36, height: 36, borderRadius: 12,
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center", justifyContent: "center",
   },
-  rowLabel: { fontSize: 15, color: colors.onSurface },
+  rowLabel: { fontSize: 15, color: colors.onSurface, fontWeight: "700" },
   rowSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   subSection: {
     paddingHorizontal: spacing.lg, paddingBottom: spacing.md, paddingTop: 4,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    borderBottomColor: colors.border, borderBottomWidth: 1,
     gap: spacing.sm,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.sheet,
   },
   subSectionLast: { borderBottomWidth: 0 },
   subRow: {
     flexDirection: "row", alignItems: "center",
     paddingVertical: spacing.md,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    borderBottomColor: colors.border, borderBottomWidth: 1,
     gap: spacing.md,
   },
-  subRowLabel: { fontSize: 14, color: colors.onSurface, fontWeight: "500" },
+  subRowLabel: { fontSize: 14, color: colors.onSurface, fontWeight: "700" },
   subRowSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   hint: { fontSize: 12, color: colors.muted, fontStyle: "italic", marginTop: 4 },
-  bodyText: { fontSize: 14, color: colors.onSurfaceTertiary, lineHeight: 20 },
+  bodyText: { fontSize: 14, color: colors.soft, lineHeight: 20 },
   faqItem: {
     paddingVertical: spacing.md,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    borderBottomColor: colors.border, borderBottomWidth: 1,
     gap: 4,
   },
-  faqQ: { fontSize: 14, color: colors.onSurface, fontWeight: "600" },
-  faqA: { fontSize: 13, color: colors.onSurfaceTertiary, lineHeight: 18 },
-  aboutTitle: { fontSize: 18, fontWeight: "700", color: colors.onSurface, marginTop: 4 },
+  faqQ: { fontSize: 14, color: colors.onSurface, fontWeight: "700" },
+  faqA: { fontSize: 13, color: colors.soft, lineHeight: 19 },
+  aboutTitle: { fontFamily: fonts.display, fontSize: 16, fontWeight: "700", color: colors.onSurface, marginTop: 4 },
   aboutRow: {
     flexDirection: "row", justifyContent: "space-between",
     paddingVertical: 8,
-    borderTopColor: colors.divider, borderTopWidth: 1,
+    borderTopColor: colors.border, borderTopWidth: 1,
   },
   aboutLabel: { fontSize: 13, color: colors.muted },
-  aboutValue: { fontSize: 13, color: colors.onSurface, fontWeight: "500" },
-  signOut: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    padding: spacing.md, borderRadius: radius.md,
-  },
-  signOutText: { color: colors.error, fontWeight: "600", fontSize: 15 },
+  aboutValue: { fontSize: 13, color: colors.onSurface, fontWeight: "700" },
 });

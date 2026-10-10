@@ -1,22 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-} from "react-native";
+import { View, StyleSheet, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/AuthContext";
-import { spacing, radius } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { sendOtp, verifyOtp } from "@/src/firebase";
 import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
@@ -193,6 +185,7 @@ export default function OtpScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <GlowBackground />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} testID="otp-back-btn" hitSlop={12}>
@@ -260,11 +253,11 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   body: { flex: 1, paddingHorizontal: spacing.xl, alignItems: "center" },
   iconWrap: {
     width: 76, height: 76, borderRadius: 38,
-    backgroundColor: colors.brandTertiary,
+    backgroundColor: colors.violet,
     alignItems: "center", justifyContent: "center",
     marginTop: spacing.xl, marginBottom: spacing.lg,
   },
-  title: { fontSize: 26, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  title: { fontFamily: fonts.display, fontSize: 26, fontWeight: "800", lineHeight: 34, color: colors.onSurface, textAlign: "center" },
   subtitle: { fontSize: 15, color: colors.muted, textAlign: "center", marginTop: spacing.sm, lineHeight: 22 },
   mobile: { fontWeight: "700", color: colors.onSurface },
   otpBox: { marginTop: spacing.xl, width: "100%", alignItems: "center" },
@@ -275,17 +268,19 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     color: colors.onSurface,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1, borderColor: colors.border,
-    borderRadius: radius.md, paddingVertical: 16,
+    borderRadius: 16, paddingVertical: 16,
   },
   error: { color: colors.error, marginTop: spacing.md, fontSize: 14, textAlign: "center", paddingHorizontal: spacing.md },
   primaryBtn: {
+    ...shadows.glow,
+    minHeight: 54,
     marginTop: spacing.xl, width: "100%",
     backgroundColor: colors.brandPrimary,
-    paddingVertical: 16, borderRadius: radius.pill,
+    paddingVertical: 16, borderRadius: 14,
     alignItems: "center", justifyContent: "center",
   },
-  primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "700" },
+  primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "800" },
   resendRow: { flexDirection: "row", gap: 6, marginTop: spacing.lg },
   resendLabel: { fontSize: 14, color: colors.muted },
-  resendLink: { fontSize: 14, color: colors.brand, fontWeight: "600" },
+  resendLink: { fontSize: 14, color: colors.accentText, fontWeight: "600" },
 });

@@ -1,15 +1,20 @@
 import { useState, useCallback, useMemo } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl,
-} from "react-native";
+import { View, StyleSheet, ScrollView, Pressable, RefreshControl } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { Image } from "expo-image";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, fonts } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { ticketTypeLabel } from "@/src/utils/ticketLabel";
+import { startsInLabel } from "@/src/utils/countdown";
+import { GlowBackground } from "@/src/ui/GlowBackground";
+import { PressableScale } from "@/src/ui/PressableScale";
+import { SkeletonRow } from "@/src/ui/Skeleton";
+import { EmptyState } from "@/src/ui/EmptyState";
+import { Tag, type TagTone } from "@/src/ui/Tag";
 
 type Booking = {
   id: string;
@@ -21,6 +26,7 @@ type Booking = {
   total_price: number;
   status: string;
   payment_status?: string;
+  checked_in?: boolean;
   cancelled_at?: string;
   refund?: { status?: string; amount_inr?: number; id?: string } | null;
   created_at: string;
@@ -28,7 +34,29 @@ type Booking = {
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+function statusOf(b: Booking): { label: string; tone: TagTone } {
+  if (b.status === "cancelled") {
+    if (b.payment_status === "refund_pending") return { label: "CANCELLED · REFUND IN PROGRESS", tone: "bad" };
+    if (b.payment_status === "refund_failed") return { label: "CANCELLED · REFUND REVIEW", tone: "bad" };
+    return { label: "CANCELLED", tone: "bad" };
+  }
+  if (b.checked_in) return { label: "CHECKED IN", tone: "info" };
+  if (b.payment_status === "paid") return { label: "CONFIRMED · PAID", tone: "ok" };
+  if (b.total_price > 0) return { label: "PAY AT VENUE", tone: "warn" };
+  return { label: "CONFIRMED · FREE", tone: "ok" };
+}
+
+function seatSummary(b: Booking) {
+  return b.seats?.length
+    ? (b.time_slot ? `${b.seats.join(", ")} · ${b.time_slot}` : b.seats.join(", "))
+    : b.time_slot
+    ? (b.num_seats && b.num_seats > 1 ? `${b.time_slot} · ${b.num_seats} seats` : b.time_slot)
+    : b.num_seats
+    ? `${b.num_seats} × ticket`
+    : "General";
 }
 
 export default function MyBookings() {
@@ -55,15 +83,15 @@ export default function MyBookings() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const now = new Date();
-  const filtered = bookings.filter((b) => {
-    if (!b.event) return false;
-    if (b.status === "cancelled") return tab === "completed";
-    const isPast = new Date(b.event.end_date || b.event.date) < now;
-    return tab === "upcoming" ? !isPast : isPast;
-  });
+  const isUpcoming = (b: Booking) =>
+    b.status !== "cancelled" && new Date(b.event.end_date || b.event.date) >= now;
+  const withEvent = bookings.filter((b) => !!b.event);
+  const upcomingCount = withEvent.filter(isUpcoming).length;
+  const filtered = withEvent.filter((b) => (tab === "upcoming" ? isUpcoming(b) : !isUpcoming(b)));
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <GlowBackground />
       <View style={styles.header}>
         <Text style={styles.title}>My Tickets</Text>
       </View>
@@ -74,7 +102,9 @@ export default function MyBookings() {
           style={[styles.segItem, tab === "upcoming" && styles.segItemActive]}
           onPress={() => setTab("upcoming")}
         >
-          <Text style={[styles.segText, tab === "upcoming" && styles.segTextActive]}>Upcoming</Text>
+          <Text style={[styles.segText, tab === "upcoming" && styles.segTextActive]}>
+            Upcoming{upcomingCount ? ` · ${upcomingCount}` : ""}
+          </Text>
         </Pressable>
         <Pressable
           testID="tab-completed"
@@ -86,92 +116,64 @@ export default function MyBookings() {
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={colors.brand} /></View>
+        <View style={{ paddingHorizontal: 20, gap: 8 }}>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </View>
       ) : filtered.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="ticket-outline" size={64} color={colors.borderStrong} />
-          <Text style={styles.emptyTitle}>No {tab} tickets</Text>
-          <Text style={styles.emptySub}>Book your next unforgettable experience.</Text>
-          <Pressable style={styles.emptyBtn} onPress={() => router.push("/(consumer)/discover" as any)} testID="go-discover-btn">
-            <Text style={styles.emptyBtnText}>Discover events</Text>
-          </Pressable>
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          <EmptyState
+            icon="ticket-outline"
+            title={tab === "upcoming" ? "No plans yet?" : "No completed tickets"}
+            subtitle={tab === "upcoming"
+              ? "Book your next unforgettable experience — concerts, comedy, workshops and more."
+              : "Tickets for events you've attended or cancelled will show up here."}
+            actionLabel="Discover events"
+            onAction={() => router.push("/(consumer)/discover" as any)}
+            actionTestID="go-discover-btn"
+          />
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+          refreshControl={<RefreshControl refreshing={refreshing} tintColor={colors.brand} colors={[colors.brand]} onRefresh={() => { setRefreshing(true); load(); }} />}
         >
-          {filtered.map((b) => (
-            <Pressable
-              key={b.id}
-              testID={`booking-card-${b.id}`}
-              style={styles.card}
-              onPress={() => router.push(`/ticket/${b.id}` as any)}
-            >
-              <View style={styles.top}>
-                <Image source={b.event?.image_url} style={styles.thumb} contentFit="cover" />
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={styles.eventTitle} numberOfLines={2}>{b.event?.title}</Text>
-                  <View style={styles.metaRow}>
-                    <Ionicons name="calendar-outline" size={13} color={colors.muted} />
-                    <Text style={styles.metaText}>{b.event ? fmtDate(b.event.start_date || b.event.date) : ""}</Text>
+          {filtered.map((b, i) => {
+            const st = statusOf(b);
+            const when = b.event.start_date || b.event.date;
+            const countdown = tab === "upcoming" ? startsInLabel(when) : null;
+            const dim = b.status === "cancelled";
+            return (
+              <Animated.View key={b.id} entering={FadeInDown.delay(Math.min(i, 8) * 50).duration(350)}>
+                <PressableScale
+                  testID={`booking-card-${b.id}`}
+                  style={[styles.card, dim && { opacity: 0.6 }]}
+                  onPress={() => router.push(`/ticket/${b.id}` as any)}
+                >
+                  <Image source={b.event?.image_url} style={styles.thumb} contentFit="cover" />
+                  <View style={styles.body}>
+                    <Tag label={st.label} tone={st.tone} />
+                    <Text style={styles.eventTitle} numberOfLines={1}>{b.event?.title}</Text>
+                    <Text style={styles.metaText} numberOfLines={1}>{fmtDate(when)} · {b.event?.location_name}</Text>
+                    <Text style={styles.metaText} numberOfLines={1}>
+                      <Text style={styles.metaLabel}>{ticketTypeLabel(b)}: </Text>{seatSummary(b)}
+                    </Text>
+                    <View style={styles.bottomRow}>
+                      {countdown ? <Text style={styles.countdown}>{countdown}</Text> : <View />}
+                      <Text style={styles.priceValue}>
+                        {b.total_price > 0 ? `₹${b.total_price.toFixed(0)}` : "Free"}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.metaRow}>
-                    <Ionicons name="location-outline" size={13} color={colors.muted} />
-                    <Text style={styles.metaText} numberOfLines={1}>{b.event?.location_name}</Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={styles.dashRow}>
-                {Array.from({ length: 20 }).map((_, i) => <View key={i} style={styles.dash} />)}
-              </View>
-
-              <View style={styles.bottom}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.smallLabel}>{ticketTypeLabel(b)}</Text>
-                  <Text style={styles.smallValue} numberOfLines={1}>
-                    {b.seats?.length
-                      ? (b.time_slot ? `${b.seats.join(", ")} · ${b.time_slot}` : b.seats.join(", "))
-                      : b.time_slot
-                      ? (b.num_seats && b.num_seats > 1
-                          ? `${b.time_slot} · ${b.num_seats} seats`
-                          : b.time_slot)
-                      : b.num_seats
-                      ? `${b.num_seats} × ticket`
-                      : "General"}
-                  </Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.smallLabel}>Total</Text>
-                  <Text style={styles.priceValue}>
-                    {b.total_price > 0 ? `₹${b.total_price.toFixed(0)}` : "Free"}
-                  </Text>
-                </View>
-                {b.status === "cancelled" && (
-                  <View style={styles.cancelledBadge}><Text style={styles.cancelledText}>Cancelled</Text></View>
-                )}
-              </View>
-
-              {b.status === "cancelled" && b.payment_status === "refund_pending" && (
-                <View style={styles.refundRow}>
-                  <Ionicons name="time-outline" size={13} color="#92400E" />
-                  <Text style={styles.refundRowText}>
-                    Refund in progress · 5-7 business days
-                  </Text>
-                </View>
-              )}
-              {b.status === "cancelled" && b.payment_status === "refund_failed" && (
-                <View style={styles.refundRow}>
-                  <Ionicons name="warning-outline" size={13} color={colors.error} />
-                  <Text style={[styles.refundRowText, { color: colors.error }]}>
-                    Refund pending manual review
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          ))}
-          <View style={{ height: 32 }} />
+                  {/* ticket-stub notches */}
+                  <View style={[styles.notch, { top: -9 }]} />
+                  <View style={[styles.notch, { bottom: -9 }]} />
+                </PressableScale>
+              </Animated.View>
+            );
+          })}
+          <View style={{ height: 24 }} />
         </ScrollView>
       )}
     </SafeAreaView>
@@ -180,56 +182,32 @@ export default function MyBookings() {
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "700", color: colors.onSurface },
+  header: { paddingHorizontal: 20, paddingTop: spacing.md, paddingBottom: spacing.md },
+  title: { fontFamily: fonts.display, fontSize: 26, fontWeight: "800", color: colors.onSurface },
   segment: {
-    flexDirection: "row", backgroundColor: colors.surfaceTertiary,
-    padding: 4, borderRadius: radius.pill, marginHorizontal: spacing.lg, marginBottom: spacing.md,
+    flexDirection: "row", backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+    padding: 4, borderRadius: 14, marginHorizontal: 20, marginBottom: spacing.lg,
   },
-  segItem: { flex: 1, paddingVertical: 10, borderRadius: radius.pill, alignItems: "center" },
-  segItemActive: { backgroundColor: colors.surfaceSecondary, ...shadows.card },
-  segText: { fontSize: 14, color: colors.muted, fontWeight: "500" },
-  segTextActive: { color: colors.onSurface, fontWeight: "600" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
-  emptyTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginTop: spacing.md },
-  emptySub: { fontSize: 14, color: colors.muted, textAlign: "center" },
-  emptyBtn: {
-    marginTop: spacing.md, backgroundColor: colors.brandPrimary,
-    paddingHorizontal: spacing.xl, paddingVertical: 12, borderRadius: radius.pill,
-  },
-  emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
-  list: { padding: spacing.lg },
+  segItem: { flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  segItemActive: { backgroundColor: colors.brand },
+  segText: { fontSize: 14, color: colors.muted, fontWeight: "700" },
+  segTextActive: { color: colors.onBrandPrimary, fontWeight: "800" },
+  list: { paddingHorizontal: 20, gap: 14 },
   card: {
+    flexDirection: "row",
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...shadows.card,
+    borderRadius: 20,
+    borderWidth: 1, borderColor: colors.border,
+    overflow: "hidden",
   },
-  top: { flexDirection: "row", gap: spacing.md },
-  thumb: { width: 72, height: 72, borderRadius: radius.md, backgroundColor: colors.surfaceTertiary },
-  eventTitle: { fontSize: 16, fontWeight: "600", color: colors.onSurface },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  metaText: { fontSize: 12, color: colors.muted, flex: 1 },
-  dashRow: {
-    flexDirection: "row", justifyContent: "space-between",
-    marginVertical: spacing.md,
-  },
-  dash: { width: 8, height: 1, backgroundColor: colors.borderStrong },
-  bottom: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: spacing.md },
-  smallLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
-  smallValue: { fontSize: 14, color: colors.onSurface, fontWeight: "500", marginTop: 2 },
-  priceValue: { fontSize: 18, color: colors.brand, fontWeight: "700", marginTop: 2 },
-  cancelledBadge: {
-    backgroundColor: "#FEE2E2", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm,
-  },
-  cancelledText: { color: colors.error, fontSize: 11, fontWeight: "600" },
-  refundRow: {
-    marginTop: spacing.sm,
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.divider,
-  },
-  refundRowText: { fontSize: 12, color: "#92400E", fontWeight: "500" },
+  thumb: { width: 96, alignSelf: "stretch", minHeight: 132, backgroundColor: colors.surfaceTertiary },
+  notch: { position: "absolute", left: 87, width: 18, height: 18, borderRadius: 9, backgroundColor: colors.surface },
+  body: { flex: 1, padding: 12, gap: 4 },
+  eventTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface, marginTop: 2 },
+  metaText: { fontSize: 12, color: colors.muted },
+  metaLabel: { fontSize: 12, color: colors.soft, fontWeight: "700" },
+  bottomRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
+  countdown: { fontSize: 12, fontWeight: "800", color: colors.accentText },
+  priceValue: { fontSize: 15, color: colors.onSurface, fontWeight: "800" },
 });

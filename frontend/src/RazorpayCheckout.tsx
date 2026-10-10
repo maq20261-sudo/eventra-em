@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from "react";
-import { View, StyleSheet, ActivityIndicator, Text, Pressable, Modal, Platform } from "react-native";
+import { View, StyleSheet, ActivityIndicator, Pressable, Modal, Platform } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { spacing } from "@/src/theme";
@@ -53,10 +54,10 @@ function buildHtml(order: RzpOrder): string {
   <title>Pay</title>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
-    body { margin: 0; padding: 0; background: #F9FAFB; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { margin: 0; padding: 0; background: #0D0B1A; color: #F5F3FF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
     .wrap { padding: 24px; text-align: center; }
-    .btn { display: inline-block; margin-top: 16px; padding: 14px 24px; background: #059669; color: white; border-radius: 999px; border: 0; font-size: 15px; font-weight: 600; }
-    p { color: #6B7280; }
+    .btn { display: inline-block; margin-top: 16px; padding: 14px 24px; background: #FF3D8B; color: #14061D; border-radius: 999px; border: 0; font-size: 15px; font-weight: 600; }
+    p { color: #A39DC0; }
   </style>
 </head>
 <body>
@@ -82,7 +83,7 @@ function buildHtml(order: RzpOrder): string {
           name: ${jsSafe(order.prefill.name)},
           email: ${jsSafe(order.prefill.email)}
         },
-        theme: { color: "#059669" },
+        theme: { color: "#FF3D8B" },
         modal: {
           ondismiss: function () {
             post({ type: "cancel" });
@@ -139,7 +140,7 @@ export default function RazorpayCheckout({ visible, order, onSuccess, onCancel, 
         name: "GatherSpace",
         description: order.description,
         prefill: order.prefill,
-        theme: { color: "#059669" },
+        theme: { color: "#FF3D8B" },
         modal: {
           ondismiss: () => onCancel(),
         },
@@ -255,7 +256,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   webLoader: {
     position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(17,24,39,0.35)",
+    backgroundColor: "rgba(5,4,12,0.62)",
   },
   webLoaderCard: {
     backgroundColor: colors.surfaceSecondary,

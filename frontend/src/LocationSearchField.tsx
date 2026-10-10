@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import {
-  View, Text, TextInput, StyleSheet, Pressable, ActivityIndicator, Platform,
-} from "react-native";
+import { View, StyleSheet, Pressable, ActivityIndicator, Platform } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
+import { reverseGeocodeCached } from "@/src/utils/areaName";
 import { spacing, radius } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 
@@ -78,29 +78,11 @@ export default function LocationSearchField({ value, onChange, autoUseCurrent = 
         accuracy: Location.Accuracy.Balanced,
       });
       const { latitude, longitude } = pos.coords;
-      // Try device-side reverse geocode first (free, no API call).
-      let name = "";
-      let address = "";
-      try {
-        const results = await Location.reverseGeocodeAsync({ latitude, longitude });
-        if (results && results[0]) {
-          const r = results[0];
-          name = r.name || r.street || r.district || r.city || "My location";
-          address = [r.name, r.street, r.district, r.city, r.region, r.country]
-            .filter(Boolean).join(", ");
-        }
-      } catch { /* fallback below */ }
-      if (!address) {
-        // Server-side reverse geocode via Google as a fallback.
-        try {
-          const rg = await api.reverseGeocode({ latitude, longitude });
-          address = rg?.formatted_address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-          name = rg?.name || name || "My location";
-        } catch {
-          address = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-          name = name || "My location";
-        }
-      }
+      // Cached lookup: on-device cache → phone geocoder (free) → server
+      // (paid Google API) only as a last resort. ~110 m cache cells.
+      const place = await reverseGeocodeCached(latitude, longitude, 3);
+      const name = place?.name || "My location";
+      const address = place?.address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
       const picked: PickedLocation = {
         name,
         formatted_address: address,

@@ -7,7 +7,10 @@ export type PricingConfig = {
   organizer_platform_fee_inr: number;
   attendee_free_booking_limit: number;
   organizer_free_event_limit: number;
+  boost_tiers?: BoostTier[];
 };
+
+export type BoostTier = { key: "24h" | "7d" | "30d"; price_inr: number; hours: number; label: string };
 
 export type Quota = {
   attendee?: {

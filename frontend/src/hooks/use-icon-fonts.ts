@@ -1,13 +1,25 @@
-// Icon font loader for Expo apps. Fonts are loaded from a CDN only under
-// Expo Go (StoreClient) — that's where @expo/vector-icons' .ttf files come
-// back as 0 bytes from Metro's asset resolver on Android. Native dev/prod
-// builds and web pass an empty map, so useFonts resolves to [true, null]
-// immediately via react-native-vector-icons autolinking / web stubs.
+// Font loader for the app: the Neon Night text fonts (Manrope + Unbounded)
+// plus, under Expo Go only, the icon fonts. Icon fonts are loaded from a CDN
+// only under Expo Go (StoreClient) — that's where @expo/vector-icons' .ttf
+// files come back as 0 bytes from Metro's asset resolver on Android. Native
+// dev/prod builds and web resolve them via autolinking / web stubs.
 // ICON_VECTOR_VERSION must match @expo/vector-icons in package.json.
 // Usage: const [loaded, error] = useIconFonts();
 
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { useFonts } from "expo-font";
+import {
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+  Manrope_800ExtraBold,
+} from "@expo-google-fonts/manrope";
+import {
+  Unbounded_600SemiBold,
+  Unbounded_700Bold,
+  Unbounded_800ExtraBold,
+} from "@expo-google-fonts/unbounded";
 
 const ICON_VECTOR_VERSION = "15.1.1";
 
@@ -44,9 +56,19 @@ const iconFontMap = (): Record<string, string> =>
     Object.entries(ICON_FAMILIES).map(([key, file]) => [key, cdnUrl(file)]),
   );
 
+const TEXT_FONTS = {
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+  Manrope_800ExtraBold,
+  Unbounded_600SemiBold,
+  Unbounded_700Bold,
+  Unbounded_800ExtraBold,
+};
+
 export const useIconFonts = (): readonly [boolean, Error | null] =>
-  useFonts(
-    Constants.executionEnvironment === ExecutionEnvironment.StoreClient
-      ? iconFontMap()
-      : {},
-  );
+  useFonts({
+    ...TEXT_FONTS,
+    ...(Constants.executionEnvironment === ExecutionEnvironment.StoreClient ? iconFontMap() : {}),
+  });

@@ -69,8 +69,10 @@ class TestPaymentsOrderCreation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["razorpay_order_id"].startswith("order_")
-        # 7d boost tier = ₹299
-        assert data["amount_inr"] == 299
+        # 7d boost tier = ₹49, and the order amount matches what the app shows
+        assert data["amount_inr"] == 49
+        tiers = {t["key"]: t["price_inr"] for t in api.get(f"{BASE_URL}/api/pricing/config").json()["boost_tiers"]}
+        assert data["amount_inr"] == tiers["7d"]
 
     def test_free_event_rejects_payment(self, api, consumer_headers):
         cfg = api.get(f"{BASE_URL}/api/payments/config").json()

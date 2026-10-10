@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Pressable, TextInput,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
-} from "react-native";
+import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -14,7 +12,8 @@ import LocationPicker from "@/src/LocationPicker";
 import RazorpayCheckout from "@/src/RazorpayCheckout";
 import { useQuota } from "@/src/hooks/usePricing";
 import * as ImagePicker from "expo-image-picker";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import DateTimeField from "@/src/DateTimeField";
 import LocationSearchField from "@/src/LocationSearchField";
@@ -302,6 +301,7 @@ export default function EventForm({ editId }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <GlowBackground />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.header}>
           {isEdit && (
@@ -367,9 +367,9 @@ export default function EventForm({ editId }: Props) {
           {!isEdit && quota?.organizer && (
             quota.organizer.free_events_remaining > 0 ? (
               <View style={[styles.quotaBanner, styles.quotaFree]} testID="quota-banner-free">
-                <Ionicons name="gift" size={18} color="#0F766E" />
+                <View style={styles.quotaIcon}><Ionicons name="gift" size={18} color={colors.onLime} /></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.quotaTitleFree}>Your first 5 events are FREE 🎉</Text>
+                  <Text style={styles.quotaTitleFree}>Your first {quota.organizer.free_event_limit} events are FREE</Text>
                   <Text style={styles.quotaSubFree}>
                     {quota.organizer.free_events_remaining} of {quota.organizer.free_event_limit} free
                     event{quota.organizer.free_events_remaining === 1 ? "" : "s"} left
@@ -378,7 +378,7 @@ export default function EventForm({ editId }: Props) {
               </View>
             ) : (
               <View style={[styles.quotaBanner, styles.quotaPaid]} testID="quota-banner-paid">
-                <Ionicons name="card" size={18} color={colors.brand} />
+                <View style={[styles.quotaIcon, { backgroundColor: colors.brand }]}><Ionicons name="card" size={18} color={colors.onBrandPrimary} /></View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.quotaTitlePaid}>
                     Publish fee: ₹{quota.organizer.platform_fee_inr}
@@ -424,7 +424,7 @@ export default function EventForm({ editId }: Props) {
               style={[styles.uploadCard, isCustomBanner && styles.imgOptionActive]}
               testID="upload-banner-btn"
             >
-              <Ionicons name="cloud-upload-outline" size={20} color={colors.brand} />
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.accentText} />
               <Text style={styles.uploadText}>Upload</Text>
             </Pressable>
             {isCustomBanner && (
@@ -509,7 +509,7 @@ export default function EventForm({ editId }: Props) {
                 style={styles.pinAdjustBtn}
                 testID="adjust-pin-btn"
               >
-                <Ionicons name="pin" size={16} color={colors.brand} />
+                <Ionicons name="pin" size={16} color={colors.accentText} />
                 <Text style={styles.pinAdjustText}>Adjust pin on map</Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.borderStrong} />
               </Pressable>
@@ -581,7 +581,7 @@ export default function EventForm({ editId }: Props) {
                 onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
                 testID="seatmap-add-slot-btn"
               >
-                <Ionicons name="add" size={16} color={colors.brand} />
+                <Ionicons name="add" size={16} color={colors.accentText} />
                 <Text style={styles.addSlotText}>Add another showing</Text>
               </Pressable>
             </>
@@ -643,7 +643,7 @@ export default function EventForm({ editId }: Props) {
                 onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
                 testID="add-slot-btn"
               >
-                <Ionicons name="add" size={16} color={colors.brand} />
+                <Ionicons name="add" size={16} color={colors.accentText} />
                 <Text style={styles.addSlotText}>Add another slot</Text>
               </Pressable>
             </>
@@ -719,170 +719,157 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    paddingHorizontal: 20, paddingVertical: spacing.md,
   },
   iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 44, height: 44, borderRadius: 14,
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center", justifyContent: "center",
   },
-  title: { flex: 1, fontSize: 22, fontWeight: "700", color: colors.onSurface },
+  title: { flex: 1, fontFamily: fonts.display, fontSize: 22, fontWeight: "800", color: colors.onSurface },
   deleteBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#FEF2F2",
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: colors.error + "1F",
+    borderWidth: 1, borderColor: colors.error + "55",
     alignItems: "center", justifyContent: "center",
   },
   label: {
-    fontSize: 13, color: colors.onSurfaceTertiary, marginBottom: spacing.xs,
-    marginTop: spacing.md, fontWeight: "500",
+    fontSize: 12, color: colors.muted, marginBottom: 6,
+    marginTop: spacing.lg, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6,
   },
   input: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 14,
-    fontSize: 15, color: colors.onSurface,
+    borderRadius: 16, paddingHorizontal: spacing.lg, minHeight: 52, paddingVertical: 14,
+    fontSize: 15, color: colors.onSurface, fontWeight: "600",
     borderColor: colors.border, borderWidth: 1,
     marginBottom: spacing.xs,
   },
   chipsRow: { gap: spacing.sm, paddingVertical: spacing.xs },
   chip: {
-    paddingHorizontal: spacing.lg, height: 36, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: spacing.lg, height: 38, alignItems: "center", justifyContent: "center",
     borderRadius: radius.pill, borderColor: colors.border, borderWidth: 1,
     backgroundColor: colors.surfaceSecondary,
   },
-  chipActive: { backgroundColor: colors.onSurface, borderColor: colors.onSurface },
-  chipText: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500" },
-  chipTextActive: { color: colors.surface, fontWeight: "600" },
-  imgOption: { padding: 2, borderRadius: 8, borderWidth: 2, borderColor: "transparent" },
+  chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  chipText: { fontSize: 13, color: colors.onSurface, fontWeight: "700" },
+  chipTextActive: { color: colors.onBrandPrimary, fontWeight: "800" },
+  imgOption: { padding: 2, borderRadius: 14, borderWidth: 2, borderColor: "transparent" },
   imgOptionActive: { borderColor: colors.brand },
   uploadCard: {
-    width: 94, height: 64, borderRadius: 10,
-    borderWidth: 2, borderColor: colors.borderStrong,
+    width: 94, height: 64, borderRadius: 14,
+    borderWidth: 1.5, borderColor: colors.brand,
     borderStyle: "dashed",
-    backgroundColor: colors.surfaceTertiary,
+    backgroundColor: colors.brand + "14",
     alignItems: "center", justifyContent: "center",
-    gap: 2,
+    gap: 2, marginTop: 2,
   },
-  uploadText: { fontSize: 11, color: colors.brand, fontWeight: "600" },
+  uploadText: { fontSize: 11, color: colors.accentText, fontWeight: "800" },
   row2: { flexDirection: "row", gap: spacing.md },
   gpsBtn: {
     flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
     paddingVertical: 8, marginTop: 2,
   },
-  gpsText: { color: colors.brand, fontSize: 13, fontWeight: "500" },
+  gpsText: { color: colors.accentText, fontSize: 13, fontWeight: "700" },
   pinAdjustBtn: {
     flexDirection: "row", alignItems: "center", gap: 8,
     backgroundColor: colors.surfaceSecondary,
     borderColor: colors.border, borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: 10,
+    borderRadius: 14,
+    paddingHorizontal: spacing.md, minHeight: 48,
     marginTop: spacing.sm,
   },
-  pinAdjustText: {
-    flex: 1, color: colors.onSurface, fontSize: 14, fontWeight: "500",
-  },
+  pinAdjustText: { flex: 1, color: colors.onSurface, fontSize: 14, fontWeight: "700" },
   quotaBanner: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    borderRadius: radius.lg, padding: spacing.md,
-    marginBottom: spacing.lg, borderWidth: 1,
+    borderRadius: 18, padding: spacing.md,
+    marginBottom: spacing.sm, borderWidth: 1,
   },
-  quotaFree: {
-    backgroundColor: "#DCFCE7",
-    borderColor: "#86EFAC",
-  },
-  quotaPaid: {
-    backgroundColor: colors.brandTertiary,
-    borderColor: colors.brandPrimary,
-  },
-  quotaTitleFree: { color: "#065F46", fontSize: 14, fontWeight: "700" },
-  quotaSubFree: { color: "#0F766E", fontSize: 12, marginTop: 2 },
-  quotaTitlePaid: { color: colors.brand, fontSize: 14, fontWeight: "700" },
-  quotaSubPaid: { color: colors.onSurfaceSecondary || colors.muted, fontSize: 12, marginTop: 2 },
-  statusBanner: {
-    flexDirection: "row", alignItems: "flex-start", gap: spacing.md,
-    borderRadius: radius.lg, padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  statusBannerIcon: {
-    width: 36, height: 36, borderRadius: 18,
+  quotaIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.lime,
     alignItems: "center", justifyContent: "center",
   },
-  statusBannerTitle: { fontSize: 14, fontWeight: "700", letterSpacing: 0.3 },
-  statusBannerSub: { fontSize: 12, marginTop: 2, opacity: 0.85 },
-  holdReasonsList: { marginTop: 8, gap: 4 },
-  holdReasonItem: {
-    flexDirection: "row", alignItems: "flex-start", gap: 6,
+  quotaFree: { backgroundColor: colors.lime + "1A", borderColor: colors.lime + "59" },
+  quotaPaid: { backgroundColor: colors.brand + "1A", borderColor: colors.brand + "66" },
+  quotaTitleFree: { color: colors.onSurface, fontSize: 14, fontWeight: "800" },
+  quotaSubFree: { color: colors.soft, fontSize: 12, marginTop: 2 },
+  quotaTitlePaid: { color: colors.onSurface, fontSize: 14, fontWeight: "800" },
+  quotaSubPaid: { color: colors.soft, fontSize: 12, marginTop: 2 },
+  statusBanner: {
+    flexDirection: "row", alignItems: "flex-start", gap: spacing.md,
+    borderRadius: 18, padding: spacing.md,
+    marginBottom: spacing.sm,
   },
-  holdReasonItemText: { flex: 1, fontSize: 12, lineHeight: 16 },
+  statusBannerIcon: {
+    width: 36, height: 36, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+  },
+  statusBannerTitle: { fontSize: 14, fontWeight: "800", letterSpacing: 0.3 },
+  statusBannerSub: { fontSize: 12, marginTop: 2, opacity: 0.9 },
+  holdReasonsList: { marginTop: 8, gap: 4 },
+  holdReasonItem: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
+  holdReasonItemText: { flex: 1, fontSize: 12, lineHeight: 16, fontWeight: "600" },
   locPicker: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md,
+    borderRadius: 16,
     padding: spacing.md,
     borderColor: colors.border, borderWidth: 1,
   },
   locIcon: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: colors.brandTertiary,
+    backgroundColor: colors.brand + "29",
     alignItems: "center", justifyContent: "center",
   },
-  locPickerTitle: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
+  locPickerTitle: { fontSize: 15, color: colors.onSurface, fontWeight: "700" },
   locPickerSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   typeCol: { gap: spacing.sm },
   typeItem: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    padding: spacing.md, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, minHeight: 54, borderRadius: 16,
     borderColor: colors.border, borderWidth: 1,
     backgroundColor: colors.surfaceSecondary,
   },
-  typeItemActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
+  typeItemActive: { borderColor: colors.brand, borderWidth: 1.5, backgroundColor: colors.brand + "1A" },
   radio: {
     width: 22, height: 22, borderRadius: 11,
     borderWidth: 2, borderColor: colors.borderStrong,
     alignItems: "center", justifyContent: "center",
   },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brand },
-  typeText: { fontSize: 15, color: colors.onSurface, fontWeight: "500" },
+  typeText: { fontSize: 15, color: colors.onSurface, fontWeight: "700" },
   addSlot: {
     flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
-    padding: 8,
+    paddingVertical: 10, paddingHorizontal: 4,
   },
-  addSlotText: { color: colors.brand, fontWeight: "500" },
-  slotHelper: {
-    fontSize: 12, color: colors.muted,
-    marginBottom: spacing.sm, marginTop: -4,
-  },
-  slotRow: {
-    flexDirection: "row", alignItems: "center",
-    gap: spacing.sm, marginBottom: spacing.sm,
-  },
+  addSlotText: { color: colors.accentText, fontWeight: "800" },
+  slotHelper: { fontSize: 12, color: colors.muted, marginBottom: spacing.sm, marginTop: -2 },
+  slotRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   slotTimeInput: { flex: 1.4, marginBottom: 0 },
-  slotCapWrap: {
-    flex: 1,
-    flexDirection: "row", alignItems: "center", gap: 4,
-  },
+  slotCapWrap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
   slotCapInput: { flex: 1, marginBottom: 0, textAlign: "center", paddingHorizontal: 8 },
-  slotCapUnit: { fontSize: 12, color: colors.muted, fontWeight: "500" },
+  slotCapUnit: { fontSize: 12, color: colors.muted, fontWeight: "700" },
   slotRemove: {
-    width: 44, height: 44, borderRadius: radius.md,
+    width: 44, height: 44, borderRadius: 14,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "#FEF2F2",
+    backgroundColor: colors.error + "1F",
   },
   error: {
-    color: colors.error, marginTop: spacing.md,
-    backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,
+    color: colors.error, marginTop: spacing.md, fontWeight: "700",
+    backgroundColor: colors.error + "1A", padding: spacing.md, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.error + "55",
   },
   stickyBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surface,
     borderTopColor: colors.border, borderTopWidth: 1,
-    padding: spacing.lg, paddingBottom: 24,
-    ...shadows.floating,
+    padding: spacing.lg, paddingBottom: 20,
   },
   submitBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: colors.brandPrimary, borderRadius: radius.pill,
-    paddingVertical: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: colors.brandPrimary, borderRadius: 16,
+    height: 54,
+    ...shadows.glow,
   },
-  submitText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+  submitText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 16 },
 });
