@@ -4,7 +4,7 @@ Single source of truth for "what is this project, how does it work, what has
 been decided and done". Update the **History** section at the end of every
 work session. Status and next steps live in `ROADMAP.md`.
 
-_Last updated: 2026-10-10_
+_Last updated: 2026-10-11_
 
 ---
 
@@ -113,7 +113,12 @@ The app must never hardcode amounts — read `/api/pricing/config` and `/api/quo
 | 2026-10-10 | **Part B / B1** (owner approved: deploy from `main`, verification off, S3 now, DNS at GoDaddy, fix Part C #1 first): production compose + Caddy, server setup + backup scripts, GitHub Actions CI/CD, health endpoint, prod hardening, S3 images, payment safety (pre-check, idempotent fulfilment, auto-refund, Razorpay webhook), CI-safe tests, `docs/DEPLOYMENT.md` runbook. | `7d2dc22` |
 | 2026-10-11 | **Part B / B2 infrastructure** (driven by Claude via AWS CLI + gh CLI, owner did console/sign-in steps): standard AWS account in Mumbai (a "new AWS experience" project was region-locked to Sydney by an AWS SCP), $15 budget, S3 bucket + IAM user, Lightsail server + static IP 65.2.231.136, setup script (fixed crontab bug), Atlas M0, GoDaddy `api` record, `backend.env` written without printing secrets, `set-secret.sh` helper, GitHub environment/secrets/variables. Razorpay KYC rejected (Individual type not allowed for ticketing) → production uses test keys for now. | `feat/aws-production` |
 
-Branches: `chore/decouple-emergent` (Part A) → `feat/neon-redesign` (redesign, pushed) → `feat/aws-production` (Part B). All ahead of the stale `main`.
+| 2026-10-11 | **First production deploy**: B1+B2 merged into `main` (PR #1), CI/CD deployed to Lightsail; verified health, HTTPS/HSTS, S3 images, backups. Preview APK tested OK on the owner's phone. | `4c0bc29` |
+| 2026-10-11 | **Secret guards** (repo stays public): `.githooks/pre-commit` + `check_secrets.py`, gitleaks CI workflow `secrets` + `.gitleaks.toml`, GitHub secret scanning/push protection, history audit clean, CLAUDE.md "Secrets" section. | `b75546e` |
+| 2026-10-11 | **Payments "coming soon" switch** (`PAYMENTS_ENABLED`): online checkout disabled with COMING SOON tag, organizer fee waived past free tier, free 24 h boost only (7/30 d coming soon) + 7 tests; set to `0` on production. | `658d363` |
+| 2026-10-11 | Production APK profile `production-apk` in `eas.json` (uncommitted, branch `chore/production-apk-profile`); first production-config APK built (1.0.0, versionCode 2) for owner testing. iOS build blocked at device registration. | — |
+
+`main` is now the real branch (all earlier work merged); production deploys from it. Work happens on short-lived branches + PRs (the owner creates/merges PRs on GitHub web).
 
 ### Production (Part B) at a glance
 `https://api.gatherspace.in` → Lightsail 1 GB Mumbai (Caddy + backend container from GHCR) → MongoDB Atlas M0 Mumbai; S3 `gatherspace-prod-media` (`event-images/` public, `backups/mongo/` private, 30-day expiry). Deploys: push to `main` → `.github/workflows/backend.yml`. Runbook: `docs/DEPLOYMENT.md`.

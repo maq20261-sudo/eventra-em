@@ -11,9 +11,9 @@ _Last updated: 2026-10-11_
 |---|---|
 | Part A — local development (Docker, VS Code, dev build, accounts) | ✅ Done (`7bdc823`) |
 | UI/UX redesign "Neon Night" + excitement features + brand assets | ✅ Done (`a064b6f`), tested by the owner on Android dev build |
-| Part B — AWS production | 🔨 In progress — B1 code done; **B2 infrastructure built 2026-10-11** (AWS, S3, Lightsail, Atlas, DNS, server secrets, GitHub); next: PR into `main` = first deploy. Razorpay on **test keys** (KYC rejected). See `docs/DEPLOYMENT.md` → Current production setup |
+| Part B — AWS production | ✅ Live 2026-10-11 at `https://api.gatherspace.in` (merged to `main`, deploys on push). Runs `658d363` with Razorpay **test** keys and `PAYMENTS_ENABLED=0` (KYC rejected). See `docs/DEPLOYMENT.md` → Current production setup |
 | Part C — bug fixes | ⏳ After B (some may be pulled earlier) |
-| Store release of the new app | ⏳ After B |
+| Store release of the new app | 🔨 Next — production APK (EAS profile `production-apk`, versionCode 2) built 2026-10-11 and under owner test; then Play AAB + listing (see "Store release" below) |
 
 ## Decisions (2026-10-10)
 - `main` becomes the real branch: PR the work into `main`; deploys run from `main`.
@@ -25,14 +25,35 @@ _Last updated: 2026-10-11_
 ## Open actions for the owner
 - [ ] Enable **Geocoding API** on the Google Cloud key (server fallback for area names).
 - [x] `docs/DEPLOYMENT.md` steps 1–5, 7, 8 done 2026-10-11 (step 6 Razorpay live postponed).
-- [ ] Merge the PR into `main` → first deploy (step 9), then preview APK test.
+- [x] Merge into `main` → first deploy (step 9); preview APK tested OK (2026-10-11).
+- [x] Payments "coming soon" switch merged (PR #3) and `PAYMENTS_ENABLED=0` set on the server.
+- [ ] Restrict the Firebase API keys in Google Cloud Console (Android/iOS app restrictions), then close GitHub secret-scanning alerts #1/#2 as "Won't fix"; close #3 (doc placeholder) as false positive.
+- [ ] Optional: UptimeRobot monitor on `https://api.gatherspace.in/api/health`.
 - [ ] Atlas: remove the temporary PC IP from Network Access when no longer needed.
 - [x] Push `feat/neon-redesign` to GitHub (done 2026-10-10).
 - [ ] **Razorpay live activation** — rejected 2026-10-11: "Individual" business type isn't supported for event ticketing. Ask Razorpay support whether a sole proprietorship (Udyam + current account, GST if needed) is accepted, else LLP/Pvt Ltd; then reapply. Until then production runs Razorpay **test** keys — decide before the store switch-over whether to wait or temporarily disable paid online flows.
-- [ ] New EAS **development build** to see the new icon/splash (`npx eas-cli build --profile development --platform android`).
-- [ ] iOS: `npx eas-cli device:create` on the iPhone, then an iOS dev build.
+- [ ] iOS: device registration failed during the first iOS build attempt (Apple ID / team step) — retry `npx eas-cli device:create` + build in the owner's PowerShell; note the exact error.
 - [ ] Play Console → App integrity: confirm Play App Signing, then **request upload-key reset** with the EAS upload certificate (takes Google a few days — start early).
-- [ ] Look up current store version codes (Play "App bundle explorer", App Store Connect) so new builds are higher (`npx eas-cli build:version:set`).
+- [ ] Look up current store version codes (EAS remote counter is at **2**, almost certainly below Play's) (Play "App bundle explorer", App Store Connect) so new builds are higher (`npx eas-cli build:version:set`).
+
+---
+
+## Store release (next)
+
+Open questions for the owner (answer at the start of the next session):
+1. Play upload-key reset requested? (EAS keystore ≠ Emergent's upload key — Google takes a few days.)
+2. Can Emergent's production database be exported, or do we launch with a fresh database?
+3. Current privacy-policy URL — if Emergent-hosted, build simple `gatherspace.in` pages (privacy, terms, delete-account).
+4. Current Play version code → `npx eas-cli build:version:set` above it.
+
+Steps:
+1. Owner tests the production APK (`eas build --profile production-apk -p android`) against production.
+2. Add the Play **App signing** SHA-1/SHA-256 to Firebase (phone OTP in store builds).
+3. `npx eas-cli build --profile production -p android` (AAB).
+4. Store listing: 512 icon, feature graphic, **new designed screenshot set** (Neon Night UI; plan delivered — pending owner choices: language, headlines, capture via adb/USB vs manual, timing), description, Data safety form.
+5. Internal testing track → staged production rollout.
+6. iOS (after device/Apple ID issue is solved) → App Store.
+7. When both stores are live on the new backend: shut down Emergent.
 
 ---
 
