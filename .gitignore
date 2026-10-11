@@ -2,7 +2,11 @@
 
 # IDE and editors
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
 
 # Dependencies
 node_modules/
@@ -82,7 +86,14 @@ memory/test_credentials.md
 android-sdk/
 .env
 .env.*
+!.env.example
 *.env
 credentials.json
 *.key
 .credentials
+
+# Templates are safe to commit
+!.env.example
+
+# VS Code Testing panel env (no secrets; points at the local test container)
+!.vscode/pytest.env

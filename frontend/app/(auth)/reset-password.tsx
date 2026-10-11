@@ -1,0 +1,395 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { View, StyleSheet, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Modal } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { api } from "@/src/api";
+import { useAuth } from "@/src/AuthContext";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import { GlowBackground } from "@/src/ui/GlowBackground";
+import { useTheme, type Colors } from "@/src/ThemeContext";
+import { sendOtp, verifyOtp } from "@/src/firebase";
+import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
+
+export default function ResetPassword() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ mobile_masked?: string }>();
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const { signInWithToken } = useAuth();
+
+  const session = getPhoneSession();
+  const [otp, setOtp] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(30);
+  const [rolePickerOpen, setRolePickerOpen] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
+  const [pendingIdToken, setPendingIdToken] = useState<string | null>(null);
+  const [mobileMasked, setMobileMasked] = useState<string>(
+    (params.mobile_masked as string) || session?.confirmation.mobileMasked || ""
+  );
+  const otpRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    const t = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => otpRef.current?.focus(), 200);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!session || session.kind !== "reset") {
+      router.replace("/(auth)/forgot-password" as any);
+    }
+  }, [session, router]);
+
+  const finalizeReset = async (idToken: string, role?: "consumer" | "organizer") => {
+    const res = await api.passwordResetVerify({
+      id_token: idToken,
+      new_password: password,
+      role,
+    });
+    if (res && (res as any).multiple_roles) {
+      const roles = (res as any).roles as string[];
+      setAvailableRoles(roles);
+      setPendingIdToken(idToken);
+      setRolePickerOpen(true);
+      return;
+    }
+    await signInWithToken(res.access_token, res.user);
+    clearPhoneSession();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert(
+      "Password updated",
+      "You've been signed in with your new password.",
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
+            else router.replace("/(consumer)/discover" as any);
+          },
+        },
+      ]
+    );
+  };
+
+  const submit = async () => {
+    setError(null);
+    if (otp.length < 6) return setError("Enter the 6-digit OTP");
+    if (password.length < 8) return setError("Password must be at least 8 characters.");
+    if (password !== confirm) return setError("Passwords don't match.");
+    if (!session) return setError("Session expired. Please start again.");
+
+    setLoading(true);
+    try {
+      const idToken = await verifyOtp(session.confirmation, otp);
+      await finalizeReset(idToken);
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(e?.message || "Couldn't reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pickRole = async (r: "consumer" | "organizer") => {
+    if (!pendingIdToken) return;
+    setRolePickerOpen(false);
+    setLoading(true);
+    try {
+      await finalizeReset(pendingIdToken, r);
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(e?.message || "Couldn't reset password.");
+    } finally {
+      setLoading(false);
+      setPendingIdToken(null);
+    }
+  };
+
+  const resend = async () => {
+    if (seconds > 0 || resending || !session) return;
+    setResending(true);
+    setError(null);
+    try {
+      const rawMobile = session.mobile.replace(/\D/g, "");
+      const fresh = await sendOtp(rawMobile, true);
+      setPhoneSession({ ...session, confirmation: fresh });
+      setMobileMasked(fresh.mobileMasked);
+      setOtp("");
+      setSeconds(30);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Alert.alert("OTP resent", `A new code was sent to ${fresh.mobileMasked}`);
+    } catch (e: any) {
+      setError(e?.message || "Couldn't resend");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <GlowBackground />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} testID="reset-back-btn" hitSlop={12}>
+            <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
+          </Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+          <View style={styles.iconWrap}>
+            <Ionicons name="lock-closed" size={32} color={colors.brand} />
+          </View>
+          <Text style={styles.title}>Reset your password</Text>
+          <Text style={styles.subtitle}>
+            Enter the 6-digit code sent to{"\n"}
+            <Text style={styles.mobile}>{mobileMasked}</Text>
+          </Text>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>OTP</Text>
+            <TextInput
+              ref={otpRef}
+              testID="otp-input"
+              value={otp}
+              onChangeText={(v) => setOtp(v.replace(/\D/g, "").slice(0, 6))}
+              keyboardType="number-pad"
+              placeholder="••••••"
+              placeholderTextColor={colors.muted}
+              style={styles.otpInput}
+              maxLength={6}
+              autoComplete="one-time-code"
+              textContentType="oneTimeCode"
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>New Password</Text>
+            <View style={styles.passwordRow}>
+              <TextInput
+                testID="new-password-input"
+                style={[styles.input, styles.passwordInput]}
+                placeholder="At least 8 characters"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+              />
+              <Pressable
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeBtn}
+                testID="toggle-password-btn"
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Confirm New Password</Text>
+            <TextInput
+              testID="confirm-password-input"
+              style={styles.input}
+              placeholder="Re-enter password"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!showPassword}
+              value={confirm}
+              onChangeText={setConfirm}
+            />
+          </View>
+
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          <Pressable
+            testID="reset-submit-btn"
+            style={[styles.primaryBtn, (loading || otp.length < 6) && { opacity: 0.55 }]}
+            onPress={submit}
+            disabled={loading || otp.length < 6}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.onBrandPrimary} />
+            ) : (
+              <Text style={styles.primaryText}>Reset Password</Text>
+            )}
+          </Pressable>
+
+          <View style={styles.resendRow}>
+            <Text style={styles.resendLabel}>Didn&apos;t receive it?</Text>
+            <Pressable onPress={resend} disabled={seconds > 0 || resending} testID="reset-resend-btn">
+              <Text style={[styles.resendLink, (seconds > 0 || resending) && { color: colors.muted }]}>
+                {seconds > 0 ? `Resend in ${seconds}s` : resending ? "Sending…" : "Resend OTP"}
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Role picker — shown when this mobile is registered as both roles. */}
+      <Modal
+        visible={rolePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRolePickerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="reset-role-picker-modal">
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="people-circle-outline" size={40} color={colors.brand} />
+            </View>
+            <Text style={styles.modalTitle}>Which account?</Text>
+            <Text style={styles.modalBody}>
+              This mobile is registered as both attendee and organizer. Pick which one to reset.
+            </Text>
+            {availableRoles.includes("consumer") && (
+              <Pressable
+                testID="reset-pick-consumer"
+                style={styles.modalBtn}
+                onPress={() => pickRole("consumer")}
+              >
+                <Ionicons name="ticket-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Reset Attendee password</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            {availableRoles.includes("organizer") && (
+              <Pressable
+                testID="reset-pick-organizer"
+                style={styles.modalBtn}
+                onPress={() => pickRole("organizer")}
+              >
+                <Ionicons name="calendar-outline" size={20} color={colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalBtnTitle}>Reset Organizer password</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => setRolePickerOpen(false)}
+              style={styles.modalCancel}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const makeStyles = (colors: Colors) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.surface },
+  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  body: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xl, alignItems: "center" },
+  iconWrap: {
+    width: 76, height: 76, borderRadius: 38,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+    marginTop: spacing.md, marginBottom: spacing.lg,
+  },
+  title: { fontSize: 24, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  subtitle: { fontSize: 15, color: colors.muted, textAlign: "center", marginTop: spacing.sm, lineHeight: 22, marginBottom: spacing.lg },
+  mobile: { fontWeight: "700", color: colors.onSurface },
+  field: { width: "100%", marginBottom: spacing.md },
+  label: { fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  input: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 16,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: colors.onSurface,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
+  otpInput: {
+    width: "100%",
+    fontSize: 28, fontWeight: "700", letterSpacing: 12,
+    textAlign: "center",
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 16, paddingVertical: 14,
+  },
+  passwordRow: { position: "relative" },
+  passwordInput: { paddingRight: 44 },
+  eyeBtn: {
+    position: "absolute", right: 4, top: 0, bottom: 0,
+    width: 44, alignItems: "center", justifyContent: "center",
+  },
+  error: {
+    color: colors.error, fontSize: 14,
+    backgroundColor: colors.error + "1A", borderWidth: 1, borderColor: colors.error + "55", padding: spacing.md, borderRadius: 16,
+    marginBottom: spacing.md, textAlign: "center", width: "100%",
+  },
+  primaryBtn: {
+    ...shadows.glow,
+    minHeight: 54,
+    marginTop: spacing.sm, width: "100%",
+    backgroundColor: colors.brandPrimary,
+    paddingVertical: 16, borderRadius: 14,
+    alignItems: "center", justifyContent: "center",
+  },
+  primaryText: { color: colors.onBrandPrimary, fontSize: 16, fontWeight: "800" },
+  resendRow: { flexDirection: "row", gap: 6, marginTop: spacing.lg },
+  resendLabel: { fontSize: 14, color: colors.muted },
+  resendLink: { fontSize: 14, color: colors.accentText, fontWeight: "600" },
+
+  // Role picker modal (shared style pattern)
+  modalBackdrop: {
+    flex: 1, backgroundColor: colors.overlay,
+    justifyContent: "center", alignItems: "center", paddingHorizontal: spacing.xl,
+  },
+  modalCard: {
+    width: "100%",
+    backgroundColor: colors.sheet, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+  },
+  modalIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  modalBody: {
+    marginTop: spacing.sm,
+    fontSize: 14, color: colors.muted,
+    textAlign: "center", lineHeight: 20, marginBottom: spacing.lg,
+  },
+  modalBtn: {
+    width: "100%",
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  modalBtnTitle: { color: colors.onSurface, fontSize: 15, fontWeight: "600" },
+  modalCancel: { marginTop: spacing.md, paddingVertical: 8 },
+  modalCancelText: { color: colors.muted, fontSize: 14, fontWeight: "500" },
+});

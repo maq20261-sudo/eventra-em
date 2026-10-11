@@ -69,8 +69,10 @@ class TestPaymentsOrderCreation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["razorpay_order_id"].startswith("order_")
-        # 7d boost tier = ₹299
-        assert data["amount_inr"] == 299
+        # 7d boost tier = ₹49, and the order amount matches what the app shows
+        assert data["amount_inr"] == 49
+        tiers = {t["key"]: t["price_inr"] for t in api.get(f"{BASE_URL}/api/pricing/config").json()["boost_tiers"]}
+        assert data["amount_inr"] == tiers["7d"]
 
     def test_free_event_rejects_payment(self, api, consumer_headers):
         cfg = api.get(f"{BASE_URL}/api/payments/config").json()
@@ -127,7 +129,14 @@ class TestPaymentsVerify:
             pytest.skip("Razorpay not configured or secret not available for local signing")
 
         events = api.get(f"{BASE_URL}/api/events").json()
-        paid = next(e for e in events if e["booking_type"] == "seat_map" and e["price"] > 0)
+        # Pick a seat_map event without time_slots (this test doesn't handle
+        # the seat_map+slot booking flow).
+        paid = next(
+            e for e in events
+            if e["booking_type"] == "seat_map"
+            and e["price"] > 0
+            and not (e.get("time_slots") or [])
+        )
         random_seat = f"Y{uuid.uuid4().hex[:2]}"
         r = api.post(
             f"{BASE_URL}/api/payments/order",

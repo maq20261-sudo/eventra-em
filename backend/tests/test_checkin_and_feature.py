@@ -3,7 +3,7 @@ import os
 import uuid
 import requests
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 BASE_URL = os.environ["EXPO_PUBLIC_BACKEND_URL"].rstrip("/")
 SF_LAT, SF_LNG = 37.7749, -122.4194
@@ -34,7 +34,7 @@ def owned_event(api, organizer_headers):
         "title": "TEST Checkin Event",
         "description": "For checkin/feature tests",
         "category": "Music",
-        "date": "2026-08-01T18:00:00Z",
+        "date": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
         "location_name": "TEST Venue Checkin",
         "latitude": SF_LAT, "longitude": SF_LNG,
         "price": 20.0,

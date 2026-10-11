@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 16 — Past events filtering + created_at DESC ordering. Backend: created 8 new pytest cases (test_past_events_and_sort.py) — ALL PASS. Full backend suite: 122 passed / 4 skipped (was 114/114; +8 new). Frontend: verified Consumer Discover (176 future-only events returned, UI order matches API created_at DESC, 0 past events leaked in), Organizer Events tab (past-events-section header visible with count '4' and 4 'Ended' chips rendered on dimmed cards after the upcoming list), Consumer Bookings tab (Upcoming/Completed tabs both work, Completed tab shows 42 past bookings categorised by end_date). Regression: category chip + search still work. All feature acceptance criteria verified end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_past_events_and_sort.py",
+    "/app/test_reports/pytest/iteration_16_past_events.xml",
+    "/app/test_reports/pytest/iteration_16_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_events sort is now 3-pass (featured group, then created_at DESC, then featured-first). Works correctly but could be simplified to a single sort key `(is_featured_rank, -created_at)` — micro-optimization only, not a bug."
+  ],
+  "updated_files": ["/app/backend/tests/test_past_events_and_sort.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Two ephemeral events created per pytest module run via /api/events (TEST_FUTURE_* and TEST_PAST_*); both cleaned up on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend list_events accepts include_past + only_past query params. Past detection uses end_date fallback to legacy `date`. Ordering: featured-first then created_at DESC. Booking blocked on past events at both /api/bookings and /api/payments/order with HTTP 400 and message 'This event has already ended and is no longer accepting bookings.' Frontend: organizer 'Past Events' section has testID=past-events-section with a count pill. Consumer discover already filters via lat/lng/radius — to see events during UI testing, set geolocation to Bengaluru (12.9716, 77.5946) via Playwright's context.set_geolocation and use radius 100km. There are 9 past events across the whole DB from seed, but only 4 belong to the demo@organizer account.",
+  "rca_of_issue": "N/A — this iteration is a feature addition, no bugs found. Verified: (1) GET /api/events default filters end_date < now, sorted created_at DESC, featured-first; (2) ?only_past=true returned 9 past events; (3) ?include_past=true returned combined set; (4) is_past boolean present on list + detail responses; (5) POST /api/bookings on past event → 400 with expected message; (6) POST /api/payments/order kind=booking on past event → 400 with expected message; (7) GET /api/organizer/events sorted DESC, each event carries is_past. UI order EXACTLY matches API order (verified by comparing first-5 testIDs)."
+}

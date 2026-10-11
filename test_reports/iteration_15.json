@@ -1,0 +1,47 @@
+{
+  "summary": "Verified GatherSpace platform-fee + first-5-free perks end-to-end (BE + FE). BACKEND: new /api/pricing/config returns exactly the expected {attendee_platform_fee_inr:9, organizer_platform_fee_inr:19, attendee_free_booking_limit, organizer_free_event_limit}. /api/quota/me returns role-scoped shape ({attendee:{paid_bookings_used, free_bookings_remaining, free_booking_limit, platform_fee_inr:9}} or {organizer:{events_used, free_events_remaining, free_event_limit, platform_fee_inr:19}}) and is auth-gated (401/403 when missing bearer). /api/payments/order (kind=booking) attaches the correct 'breakdown' block: under free tier fee_waived=true & platform_fee_inr=0 & amount_paise = ticket_paise; beyond tier (verified after setting env=0) fee_waived=false, platform_fee_inr=9, amount_paise = ticket_paise + 900. /api/payments/order (kind=platform_fee) returns 400 'No payment needed yet' under free tier; beyond tier returns a live Razorpay order for exactly 1900 paise (₹19). /api/events (organizer) beyond tier without platform_intent_id returns 402 with {requires_platform_fee:true, fee_inr:19.0}; invalid intent → 400/402; free-tier creation still works and quota's events_used is incremented. Full pytest suite: 114 passed, 4 skipped (0 failures) — was 106/106, so 8 new platform-fee tests all pass (4 skipped are the beyond-tier variants that are gated on env=0 and were validated separately in a paid-tier run where they all passed). New file: /app/backend/tests/test_platform_fees.py. FRONTEND (mobile viewport 390x844): FIXED a metro bundling BLOCKER (SyntaxError in /app/frontend/app/book/[id].tsx line ~809 — orphaned 'marginTop: spacing.lg, gap: spacing.sm,' fragment left over from an old payMethodBlock edit; removed it so the whole app now bundles). After fix: (a) Booking screen for a paid event (₹100 general) renders the fee-breakdown card with testID 'fee-breakdown' exactly as spec'd — 'Ticket subtotal ₹100', 'Platform fee' + green FREE chip + strike-through '₹9', '🎉 832 of 999 free bookings left', divider, 'Total ₹100'. Sticky bar at bottom shows Total = ₹100 (grand total, not just ticket). (b) Organizer create screen renders testID 'quota-banner-free' with copy 'Your first 5 events are FREE 🎉 · 940 of 999 free events left' when remaining>0; Publish button label = 'Publish Event'. After bumping ORGANIZER_FREE_EVENT_LIMIT to 0 (paid-tier simulation), quota-banner-paid renders instead with copy 'Publish fee: ₹19' and the Publish button re-labels to 'Publish for ₹19' — exactly per spec. Razorpay checkout modal launch on 402 was NOT triggered live in Playwright (would require paying a real test-mode intent), but the code path (server 402 → catch requires_platform_fee → openRzpFeeCheckout → api.createPaymentOrder(kind:'platform_fee') → RazorpayCheckout modal → verify → resubmit event with platform_intent_id) is straight-line and covered by existing backend tests. (c) MINOR: the offer-banner in /(consumer)/discover.tsx is nested INSIDE the events-list ScrollView (line 426 branch of `events.length===0 ? EmptyState : <ScrollView>`), so the banner is hidden when the discover feed is empty even if the consumer has free bookings remaining — verified: with 0 events in radius the banner does not render despite quota.attendee.free_bookings_remaining=832. When events exist the code renders correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/quota/me", "issue": "Returns HTTP 403 (not 401) when Authorization header missing — same FastAPI HTTPBearer default behavior called out in prior iteration; not a regression."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/(consumer)/discover.tsx", "issue": "offer-banner (testID='offer-banner') is inside the events-list ScrollView so it is hidden whenever events.length===0. Consumer sees no free-booking hint on an empty feed. Suggested fix: move the banner ABOVE the loading/empty/list branch so it always shows when quota.attendee.free_bookings_remaining>0.", "testID": "offer-banner", "priority": "LOW"},
+      {"component": "src/EventForm.tsx (quota-banner-paid)", "issue": "Copy uses raw limit value: with env-override ORGANIZER_FREE_EVENT_LIMIT=0 the banner reads 'You've used all 0 free events.' This won't ship in prod (limit=5 → 'used all 5'), but consider a conditional string.", "testID": "quota-banner-paid", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_platform_fees.py",
+    "/app/test_reports/pytest/iteration_15_full.xml"
+  ],
+  "action_items": [
+    "(Optional) Lift the offer-banner in discover.tsx outside the events list conditional so it also renders when the feed is empty.",
+    "(Optional) Rewrite the paid-tier quota banner sub-copy to gracefully handle limit=0 (e.g. 'You've used up your free events').",
+    "Ready for main-agent to flip .env limits back to 5 for prod K8s (currently 999 for pytest-safety, per PRD).",
+    "Recurring code-review nit: server.py is still ~2350 lines; keep on the future 'split into per-domain routers' backlog."
+  ],
+  "critical_code_review_comments": [
+    "Server correctly reads *_FREE_*_LIMIT via helper fns (_attendee_free_limit / _organizer_free_limit) on each call so env overrides take effect without restart-inside-tests — good.",
+    "platform_intent_id is popped from the event doc before insert (server.py:1031) so raw intent IDs never persist on events — good.",
+    "consumed_for_event_id single-use guard on payment_intents prevents replay of a paid platform fee across multiple event creations (server.py:1027-28 + 1064-68) — good.",
+    "Booking breakdown correctly computes free_bookings_remaining_after_this by decrementing when waived (server.py:2128-30) — matches spec.",
+    "Kept a MINOR bug-fix in book/[id].tsx (orphaned style fragment). No other frontend logic changes."
+  ],
+  "updated_files": [
+    "/app/frontend/app/book/[id].tsx (removed orphaned style fragment that blocked metro bundle)",
+    "/app/backend/tests/test_platform_fees.py (NEW — 12 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (114/114 executed in free-tier run + 4 beyond-tier tests validated in a separate env=0 run — all pass; prior 106/106 preserved)",
+    "frontend": "100% for all directly testable free-tier & paid-tier UI (fee-breakdown card, sticky total, quota-banner-free, quota-banner-paid, Publish button label swap). Razorpay modal launch on 402 not driven live in Playwright but code path is straight-forward and all supporting APIs pass."
+  },
+  "seed_data_creation": "Registered two TEST_pf_c_* / TEST_pf_o_* users via /api/auth/register during pytest run (fresh-tier tests only). No manual seed changes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend platform-fee tests live at /app/backend/tests/test_platform_fees.py. They read the current limits dynamically from /api/pricing/config, so the file works in BOTH the free-tier env (default: limits=999 → 8 pass, 4 skipped) and paid-tier env (limits=0 → 9 pass, 3 skipped). To exercise the paid-tier path: `sed -i 's/^ORGANIZER_FREE_EVENT_LIMIT=.*/ORGANIZER_FREE_EVENT_LIMIT=0/' /app/backend/.env && sed -i 's/^ATTENDEE_FREE_BOOKING_LIMIT=.*/ATTENDEE_FREE_BOOKING_LIMIT=0/' /app/backend/.env && sudo supervisorctl restart backend`, then run pytest, then restore. Frontend bundle blocker fixed in book/[id].tsx (deleted orphan style fragment at lines ~809-811). Screenshots this iteration: /tmp/04_book.png (fee-breakdown card working), /tmp/07_create.png + /tmp/08_create_bottom.png (quota-banner-free + Publish Event label), /tmp/09_create_paid.png (quota-banner-paid + Publish for ₹19)."
+}

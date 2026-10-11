@@ -1,0 +1,34 @@
+{
+  "summary": "Verified the seat_map+slot ticket/bookings-list UX bug fix end-to-end. FRONTEND (all requested UI cases pass): (1) /ticket/[id] for the seed seat_map+slot booking c9b8e21b renders the highlighted 'YOUR TIME SLOT / Matinee 3PM' banner WITH the people-badge showing seat count '1', and the details row below the QR now shows label 'SEATS' with value 'A1'. (2) /ticket/[id] for a pure time_slot booking (f68a512d, TEST_i11_TicketSlotUI, slot '2 PM', num_seats 3) still shows the banner 'YOUR TIME SLOT / 2 PM' with a '3' badge and the details row 'TIME SLOT / 2 PM · 3 seats' — unchanged. (3) /(consumer)/bookings card for the seat_map+slot booking shows label 'SEATS' + value 'A1 · Matinee 3PM'. (4) /(consumer)/bookings card for pure time_slot booking shows 'TIME SLOT' + '2 PM · 3 seats'. Screenshots confirm all four. Note: labels display uppercase due to CSS text-transform:uppercase, source strings in code remain 'Seats' / 'Time slot' as spec'd. BACKEND: 105/107 pytest pass (no backend code changed in this fix). Two failures are known / non-regressive: (a) /api/auth/register 429 rate-limit on test_booked_seats_endpoint_filters_by_slot (documented iteration_12), (b) test_signature_verify_creates_booking now fails because iteration_12's leftover seed event TEST_i12_SeatMapSlots is a paid seat_map+slot event and the test picks the first paid seat_map event without providing a time_slot — this is a pre-existing test-vs-seed data issue introduced when the slot-enforced event was seeded, NOT caused by this frontend-only fix. Scanner UI (5) could not be end-to-end verified via web preview (needs camera + QR scan), but static code review of ticketTypeLine() confirms it emits 'Seats · A1  ·  Matinee 3PM' (icon grid-outline) for the seed booking payload, exactly matching the spec.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/payments/verify (test)", "issue": "test_signature_verify_creates_booking picks the first paid seat_map event via next(...) — this now returns TEST_i12_SeatMapSlots (has time_slots), so the booking is rejected with 'Please pick a time slot'. Not a product bug; the test needs to filter events that don't have time_slots (or include a time_slot when the event has them)."},
+      {"endpoint": "POST /api/auth/register (test)", "issue": "5/min rate-limit still causes test_booked_seats_endpoint_filters_by_slot to fail on full-suite runs (known from iteration_12). Passes solo."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iteration_13_full.xml"
+  ],
+  "action_items": [
+    "Backend test-only nit: in /app/backend/tests/test_payments.py test_signature_verify_creates_booking, change the event selector to skip events whose booking_type is seat_map AND that have non-empty time_slots (or supply a time_slot in the payload). Not blocking the current fix.",
+    "Consider cleaning up the leftover TEST_i12_SeatMapSlots seed event once it's no longer needed for manual verification, so future test runs aren't affected."
+  ],
+  "critical_code_review_comments": [
+    "The label/value priority logic is now duplicated in three places: /app/frontend/src/utils/ticketLabel.ts (helper), /app/frontend/app/ticket/[id].tsx (lines 111-126 inline, does NOT call the helper), and /app/frontend/app/(consumer)/bookings.tsx (lines 131-144 inline, also does NOT call the helper). The shared helper exists but only scanner.tsx actually uses it. Refactor ticket/[id].tsx and bookings.tsx to import { ticketTypeLabel, ticketTypeValue } from '@/src/utils/ticketLabel' so the priority chain lives in exactly one place — otherwise the next tweak to priority will silently drift.",
+    "server.py still 2008+ lines (flagged since iteration_10) — unrelated to this fix but persistent."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "98.1% (105/107; both failures are pre-existing / test-harness issues, not product regressions)", "frontend": "100% for all 4 web-testable UX cases (seat+slot ticket, pure-slot ticket, seat+slot bookings card, pure-slot bookings card). Scanner case verified by code review only — cannot run camera in web preview."},
+  "seed_data_creation": "None. Reused iteration_12 seed booking c9b8e21b-0a2c-4cc4-95cb-b7e82a3acddd (seat A1, slot 'Matinee 3PM' on TEST_i12_SeatMapSlots) and iteration_11 seed booking f68a512d-9755-4998-92c4-86e8c5076e2e (pure time_slot '2 PM', 3 seats on TEST_i11_TicketSlotUI).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Screenshots at /tmp/A_bookings_list.png (both cards visible), /tmp/B_ticket_seat_slot.png (Matinee 3PM banner + 1-badge + SEATS row A1), /tmp/C_ticket_time_slot.png (2 PM banner + 3-badge + TIME SLOT row '2 PM · 3 seats'). If you need to reproduce, log in as demo@consumer.com / password123, go to My Tickets → Upcoming; the two target cards are the first (TEST_i12_SeatMapSlots) and the TEST_i11_TicketSlotUI card further down. Scanner ticket-type row cannot be tested in web preview (no camera); confirm by unit-testing ticketTypeLine() in /app/frontend/src/utils/ticketLabel.ts.",
+  "rca_of_issue": "N/A — this was a UX bug fix and it's implemented correctly. Only code-quality nit: the label/value priority chain is not yet consolidated behind the shared helper for the ticket and bookings screens (they carry inline copies). Fix is functionally correct but drift-prone."
+}

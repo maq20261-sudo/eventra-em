@@ -37,20 +37,58 @@ async function request(
     data = text;
   }
   if (!res.ok) {
-    const message =
-      (data && (data.detail || data.message)) || `Request failed (${res.status})`;
-    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+    const detail = data && (data.detail || data.message);
+    const message = detail || `Request failed (${res.status})`;
+    const err: any = new Error(typeof message === "string" ? message : JSON.stringify(message));
+    err.status = res.status;
+    // Preserve the raw detail so callers can branch on structured fields
+    // like `requires_platform_fee` without re-parsing the message.
+    err.detail = detail;
+    err.data = data;
+    throw err;
   }
   return data;
 }
 
 export const api = {
-  // Auth
+  // Auth (legacy — kept for demo/back-compat)
   register: (body: { email: string; password: string; name: string; role: "consumer" | "organizer" }) =>
     request("/auth/register", { method: "POST", body: JSON.stringify(body) }),
-  login: (body: { email: string; password: string }) =>
+  login: (body: { email: string; password: string; role?: "consumer" | "organizer" }) =>
     request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   me: () => request("/auth/me", { method: "GET" }, true),
+
+  // OTP-gated auth (MSG91) — legacy path, still supported for demo/backcompat.
+  registerStart: (body: { email: string; password: string; name: string; role: "consumer" | "organizer"; mobile: string }) =>
+    request("/auth/register/start", { method: "POST", body: JSON.stringify(body) }),
+  registerVerify: (body: { challenge_id: string; otp: string }) =>
+    request("/auth/register/verify", { method: "POST", body: JSON.stringify(body) }),
+  loginStart: (body: { email: string; password: string }) =>
+    request("/auth/login/start", { method: "POST", body: JSON.stringify(body) }),
+  loginVerify: (body: { challenge_id: string; otp: string }) =>
+    request("/auth/login/verify", { method: "POST", body: JSON.stringify(body) }),
+  logout: () => request("/auth/logout", { method: "POST" }),
+  otpResend: (body: { challenge_id: string }) =>
+    request("/auth/otp/resend", { method: "POST", body: JSON.stringify(body) }),
+
+  // Firebase Phone Auth — client verifies via Firebase, backend upserts user
+  // & mints our own JWT after checking the Firebase ID token.
+  firebaseVerify: (body: {
+    id_token: string;
+    name: string;
+    email: string;
+    password: string;
+    role: "consumer" | "organizer";
+  }) => request("/auth/firebase-verify", { method: "POST", body: JSON.stringify(body) }),
+
+  // Password reset — client presents a fresh Firebase Phone OTP token +
+  // the new password. Backend verifies the token, updates password_hash,
+  // and returns a JWT so the user lands signed-in.
+  passwordResetVerify: (body: {
+    id_token: string;
+    new_password: string;
+    role?: "consumer" | "organizer";
+  }) => request("/auth/password-reset/verify", { method: "POST", body: JSON.stringify(body) }),
 
   // Events
   listEvents: (params: {
@@ -59,6 +97,8 @@ export const api = {
     radius_km?: number;
     category?: string;
     search?: string;
+    include_past?: boolean;
+    only_past?: boolean;
   }) => {
     const q = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
@@ -73,7 +113,27 @@ export const api = {
     request(`/events/${id}`, { method: "PUT", body: JSON.stringify(body) }, true),
   deleteEvent: (id: string) =>
     request(`/events/${id}`, { method: "DELETE" }, true),
-  bookedSeats: (id: string) => request(`/events/${id}/booked-seats`, { method: "GET" }),
+  bookedSeats: (id: string, timeSlot?: string) =>
+    request(
+      `/events/${id}/booked-seats${timeSlot ? `?time_slot=${encodeURIComponent(timeSlot)}` : ""}`,
+      { method: "GET" },
+    ),
+
+  // ---- Google Places proxy ----
+  placesAutocomplete: (body: {
+    input: string;
+    session_token: string;
+    latitude?: number;
+    longitude?: number;
+  }) => request("/places/autocomplete", { method: "POST", body: JSON.stringify(body) }),
+  placeDetails: (body: { place_id: string; session_token: string }) =>
+    request("/places/details", { method: "POST", body: JSON.stringify(body) }),
+  reverseGeocode: (body: { latitude: number; longitude: number }) =>
+    request("/places/reverse", { method: "POST", body: JSON.stringify(body) }),
+
+  // ---- Platform fees & free-tier perks ----
+  pricingConfig: () => request("/pricing/config", { method: "GET" }),
+  myQuota: () => request("/quota/me", { method: "GET" }),
   myOrgEvents: () => request(`/organizer/events`, { method: "GET" }, true),
 
   // Bookings

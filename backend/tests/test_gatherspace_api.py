@@ -3,11 +3,15 @@ import os
 import uuid
 import requests
 import pytest
+from datetime import datetime, timedelta, timezone
 
 BASE_URL = os.environ["EXPO_PUBLIC_BACKEND_URL"].rstrip("/")
 
 # San Francisco base
 SF_LAT, SF_LNG = 37.7749, -122.4194
+
+def _future_iso(days: int = 7) -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat().replace("+00:00", "Z")
 
 
 # ---------- Auth ----------
@@ -121,7 +125,7 @@ class TestEventCRUD:
             "title": "TEST Seat Map Event",
             "description": "Test description",
             "category": "Music",
-            "date": "2026-06-01T18:00:00Z",
+            "date": _future_iso(7),
             "location_name": "Test Venue",
             "latitude": SF_LAT, "longitude": SF_LNG,
             "price": 25.0,
@@ -144,7 +148,7 @@ class TestEventCRUD:
             "title": "TEST General Event",
             "description": "General admission",
             "category": "Food",
-            "date": "2026-06-05T18:00:00Z",
+            "date": _future_iso(10),
             "location_name": "Test Venue G",
             "latitude": SF_LAT, "longitude": SF_LNG,
             "price": 10.0,
@@ -160,7 +164,7 @@ class TestEventCRUD:
             "title": "TEST TimeSlot Event",
             "description": "Slots",
             "category": "Tech",
-            "date": "2026-06-10T09:00:00Z",
+            "date": _future_iso(14),
             "location_name": "Test Venue T",
             "latitude": SF_LAT, "longitude": SF_LNG,
             "price": 0.0,
@@ -174,7 +178,7 @@ class TestEventCRUD:
     def test_consumer_cannot_create_event(self, api, consumer_headers):
         payload = {
             "title": "Forbidden", "description": "x", "category": "Music",
-            "date": "2026-06-01T18:00:00Z", "location_name": "x",
+            "date": _future_iso(7), "location_name": "x",
             "latitude": 0, "longitude": 0, "price": 0,
             "booking_type": "general", "total_seats": 10,
         }

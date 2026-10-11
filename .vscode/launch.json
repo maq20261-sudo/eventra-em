@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Attach to debugpy inside the running backend container (docker compose up -d).
+      "name": "Backend: Attach (Docker)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "127.0.0.1", "port": 5678 },
+      "pathMappings": [
+        { "localRoot": "${workspaceFolder}/backend", "remoteRoot": "/app" }
+      ],
+      "justMyCode": true,
+      "subProcess": true
+    },
+    {
+      // Attach to the app running on the phone. Start Metro first ("Frontend: Metro" task)
+      // and open the dev build so it connects.
+      "name": "Frontend: Attach (Expo)",
+      "type": "expo",
+      "request": "attach",
+      "projectRoot": "${workspaceFolder}/frontend",
+      "bundlerPort": "8081",
+      "bundlerHost": "127.0.0.1"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack: Attach both",
+      "configurations": ["Backend: Attach (Docker)", "Frontend: Attach (Expo)"]
+    }
+  ]
+}

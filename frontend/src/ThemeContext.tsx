@@ -26,56 +26,85 @@ export type Colors = {
   borderStrong: string;
   divider: string;
   muted: string;
+  // Neon Night additions
+  accentText: string; // pink that reads well as text on the surface
+  violet: string;
+  violetText: string;
+  lime: string;
+  onLime: string;
+  soft: string; // secondary body text (lighter than muted)
+  sheet: string; // bottom sheets / modals
+  overlay: string; // scrim behind sheets
 };
 
-export const LIGHT_COLORS: Colors = {
-  surface: "#F9FAFB",
-  onSurface: "#111827",
-  surfaceSecondary: "#FFFFFF",
-  onSurfaceSecondary: "#111827",
-  surfaceTertiary: "#F3F4F6",
-  onSurfaceTertiary: "#374151",
-  surfaceInverse: "#1F2937",
-  onSurfaceInverse: "#F9FAFB",
-  brand: "#059669",
-  brandPrimary: "#059669",
-  onBrandPrimary: "#FFFFFF",
-  brandSecondary: "#10B981",
-  brandTertiary: "#D1FAE5",
-  onBrandTertiary: "#065F46",
-  success: "#059669",
-  warning: "#D97706",
-  error: "#DC2626",
-  info: "#4B5563",
-  border: "#E5E7EB",
-  borderStrong: "#D1D5DB",
-  divider: "#F3F4F6",
-  muted: "#6B7280",
-};
-
+// Neon Night (design 1). All base colours are 6-digit hex because some
+// screens append an alpha suffix, e.g. `colors.brand + "22"`.
 export const DARK_COLORS: Colors = {
-  surface: "#0B0F14",
-  onSurface: "#F9FAFB",
-  surfaceSecondary: "#111827",
-  onSurfaceSecondary: "#F9FAFB",
-  surfaceTertiary: "#1F2937",
-  onSurfaceTertiary: "#D1D5DB",
-  surfaceInverse: "#F9FAFB",
-  onSurfaceInverse: "#111827",
-  brand: "#10B981",
-  brandPrimary: "#10B981",
-  onBrandPrimary: "#02231A",
-  brandSecondary: "#34D399",
-  brandTertiary: "#064E3B",
-  onBrandTertiary: "#A7F3D0",
-  success: "#10B981",
-  warning: "#F59E0B",
-  error: "#F87171",
-  info: "#9CA3AF",
-  border: "#1F2937",
-  borderStrong: "#374151",
-  divider: "#1F2937",
-  muted: "#9CA3AF",
+  surface: "#0D0B1A",
+  onSurface: "#F5F3FF",
+  surfaceSecondary: "#1A1630",
+  onSurfaceSecondary: "#F5F3FF",
+  surfaceTertiary: "#1E1838",
+  onSurfaceTertiary: "#CFC9EA",
+  surfaceInverse: "#F5F3FF",
+  onSurfaceInverse: "#0D0B1A",
+  brand: "#FF3D8B",
+  brandPrimary: "#FF3D8B",
+  onBrandPrimary: "#14061D",
+  brandSecondary: "#7C5CFF",
+  brandTertiary: "#3A1530",
+  onBrandTertiary: "#FF9AC2",
+  success: "#C6FF3D",
+  warning: "#FFB547",
+  error: "#FF6B6B",
+  info: "#A39DC0",
+  border: "#2C2550",
+  borderStrong: "#3A3366",
+  divider: "#241E42",
+  muted: "#A39DC0",
+  accentText: "#FF6FA8",
+  violet: "#7C5CFF",
+  violetText: "#C9B8FF",
+  lime: "#C6FF3D",
+  onLime: "#14061D",
+  soft: "#CFC9EA",
+  sheet: "#15122A",
+  overlay: "rgba(5,4,12,0.62)",
+};
+
+// Light variant of the same palette, kept so the Profile "Dark theme"
+// switch still works.
+export const LIGHT_COLORS: Colors = {
+  surface: "#FAF8FF",
+  onSurface: "#17112E",
+  surfaceSecondary: "#FFFFFF",
+  onSurfaceSecondary: "#17112E",
+  surfaceTertiary: "#F1EDFB",
+  onSurfaceTertiary: "#3B3360",
+  surfaceInverse: "#17112E",
+  onSurfaceInverse: "#FAF8FF",
+  brand: "#E5246F",
+  brandPrimary: "#E5246F",
+  onBrandPrimary: "#FFFFFF",
+  brandSecondary: "#6D4AFF",
+  brandTertiary: "#FFE3EF",
+  onBrandTertiary: "#A3124B",
+  success: "#3E7F00",
+  warning: "#B45309",
+  error: "#DC2626",
+  info: "#5B5480",
+  border: "#E6E0F5",
+  borderStrong: "#D3CBEA",
+  divider: "#F1EDFB",
+  muted: "#6B6390",
+  accentText: "#C2185B",
+  violet: "#6D4AFF",
+  violetText: "#5B3FD9",
+  lime: "#C6FF3D",
+  onLime: "#14061D",
+  soft: "#4A4270",
+  sheet: "#FFFFFF",
+  overlay: "rgba(23,17,46,0.45)",
 };
 
 type Ctx = {
@@ -87,10 +116,12 @@ type Ctx = {
 
 const ThemeContext = createContext<Ctx | undefined>(undefined);
 
-const STORAGE_KEY = "gs_theme_mode";
+// v2: the Neon Night redesign defaults everyone to dark, so earlier saved
+// "light" preferences (the old default) are intentionally not carried over.
+const STORAGE_KEY = "gs_theme_mode_v2";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>("light");
+  const [mode, setModeState] = useState<ThemeMode>("dark");
 
   useEffect(() => {
     (async () => {

@@ -1,0 +1,98 @@
+# Local development stack: MongoDB + FastAPI backend (hot reload).
+# The Expo app runs on the host (npx expo start) and talks to the backend
+# on http://<your-PC-LAN-IP>:8001.
+#
+#   docker compose up -d                 # start mongo + backend
+#   docker compose logs -f backend       # follow backend logs
+#   (VS Code: attach the debugger to localhost:5678 — see .vscode/launch.json)
+#   docker compose exec backend python seed.py   # load demo data
+#   docker compose --profile test run --rm tests # run backend test suite
+#   docker compose --profile tools up -d mongo-express  # DB browser on :8082
+
+name: gatherspace
+
+x-backend: &backend
+  build:
+    context: ./backend
+    args:
+      INSTALL_DEV: "1"
+  image: gatherspace-backend:dev
+  env_file: ./backend/.env
+  volumes:
+    - ./backend:/app
+  depends_on:
+    mongo:
+      condition: service_healthy
+
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"   # for MongoDB for VS Code / Compass
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    <<: *backend
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+      - "127.0.0.1:5678:5678"     # debugpy — VS Code "Backend: Attach (Docker)"
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      # Windows bind mounts don't emit inotify events inside WSL2 — poll instead.
+      WATCHFILES_FORCE_POLLING: "true"
+      PYDEVD_DISABLE_FILE_VALIDATION: "1"   # silences debugpy's frozen-modules warning
+    # debugpy follows uvicorn's reload worker, so breakpoints survive reloads.
+    command: python -m debugpy --listen 0.0.0.0:5678 -m uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+
+  # Isolated server for the pytest suite: separate DB, mocked Firebase/SMS,
+  # no rate limiting. Never shares state with the dev backend above.
+  backend-test:
+    <<: *backend
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:8002:8001"     # for running pytest from VS Code's Testing panel
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: gatherspace_test
+      FIREBASE_DEV_BYPASS: "1"
+      MSG91_MOCK_MODE: "1"
+      DISABLE_RATE_LIMIT: "1"
+      # Seeded demo organizer already owns 5 events; lift the free-tier cap so
+      # the CRUD tests can create events. Fee tests read the limit and adapt.
+      ORGANIZER_FREE_EVENT_LIMIT: "1000"
+    command: uvicorn server:app --host 0.0.0.0 --port 8001
+
+  tests:
+    <<: *backend
+    profiles: ["test"]
+    depends_on:
+      backend-test:
+        condition: service_healthy
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: gatherspace_test
+      FIREBASE_DEV_BYPASS: "1"
+      EXPO_PUBLIC_BACKEND_URL: http://backend-test:8001
+    command: sh -c "python seed.py && pytest -q -p no:cacheprovider"
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    profiles: ["tools"]
+    ports:
+      - "127.0.0.1:8082:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:

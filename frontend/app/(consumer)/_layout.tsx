@@ -1,23 +1,16 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/ThemeContext";
+import { NeonTabBar } from "@/src/ui/NeonTabBar";
 
 export default function ConsumerLayout() {
   const { colors } = useTheme();
   return (
     <Tabs
+      tabBar={(props) => <NeonTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.brand,
-        tabBarInactiveTintColor: colors.muted,
-        tabBarStyle: {
-          backgroundColor: colors.surfaceSecondary,
-          borderTopColor: colors.border,
-          height: 84,
-          paddingTop: 8,
-          paddingBottom: 24,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "500" },
+        sceneStyle: { backgroundColor: colors.surface },
       }}
     >
       <Tabs.Screen

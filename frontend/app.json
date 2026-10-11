@@ -1,34 +1,49 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "GatherSpace",
+    "slug": "gatherspace",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "gatherspace",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/fc1b7265-9d57-4f91-ad33-98518f8b489a"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.discoverbookevents.kb2hgl",
+      "bundleIdentifier": "com.maq.gatherspace",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find events happening near you",
         "NSCameraUsageDescription": "Scan ticket QR codes at your event entrance",
-        "NSPhotoLibraryUsageDescription": "Upload a cover image for your event"
+        "NSPhotoLibraryUsageDescription": "Upload a cover image for your event",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#0D0B1A"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.discoverbookevents.kb2hgl",
+      "package": "com.maq.gatherspace",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -42,26 +57,46 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#0D0B1A"
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Scan ticket QR codes at your event entrance"
+          "cameraPermission": "Scan ticket QR codes at your event entrance",
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Upload a cover image for your event"
+          "photosPermission": "Upload a cover image for your event",
+          "microphonePermission": false
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fc1b7265-9d57-4f91-ad33-98518f8b489a"
+      }
+    },
+    "owner": "maq2026s-team"
   }
 }

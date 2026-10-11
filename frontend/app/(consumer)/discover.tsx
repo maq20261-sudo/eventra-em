@@ -1,59 +1,64 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  ActivityIndicator,
-  RefreshControl,
-  Modal,
-  TextInput,
-  Dimensions,
-  Alert,
-  Linking,
-  Platform,
-} from "react-native";
+import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Modal, Dimensions, Alert, Linking, Platform, AppState } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import Animated, {
+  FadeInDown,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { api } from "@/src/api";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
 import { useTheme, type Colors } from "@/src/ThemeContext";
 import { storage } from "@/src/utils/storage";
+import { useQuota } from "@/src/hooks/usePricing";
+import { useAuth } from "@/src/AuthContext";
+import { eventTypeShortLabel, eventTypeIcon } from "@/src/utils/eventTypeLabel";
+import { urgencyOf, goingLabel, type CapacityFields } from "@/src/utils/urgency";
+import { areaNameFor, distanceKm } from "@/src/utils/areaName";
+import { GlowBackground } from "@/src/ui/GlowBackground";
+import { PressableScale } from "@/src/ui/PressableScale";
+import { Skeleton, SkeletonCard, SkeletonRow } from "@/src/ui/Skeleton";
+import { EmptyState } from "@/src/ui/EmptyState";
+import { Tag } from "@/src/ui/Tag";
+import { Button } from "@/src/ui/Button";
 
-const CATEGORIES: { key: string; label: string; icon: any; color: string; image: string }[] = [
-  { key: "All", label: "All", icon: "sparkles", color: "#059669",
-    image: "https://images.unsplash.com/photo-1545150665-c72a8f0cf311?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHxwYXJ0eSUyMGV2ZW50fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Music", label: "Music", icon: "musical-notes", color: "#8B5CF6",
-    image: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzR8MHwxfHNlYXJjaHwxfHxjb25jZXJ0fGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Art", label: "Art", icon: "color-palette", color: "#F97316",
-    image: "https://images.pexels.com/photos/9221307/pexels-photo-9221307.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Tech", label: "Tech", icon: "hardware-chip", color: "#0EA5E9",
-    image: "https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwyfHx0ZWNoJTIwY29uZmVyZW5jZXxlbnwwfHx8fDE3ODQ0ODE5NTV8MA&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Food", label: "Food", icon: "restaurant", color: "#EF4444",
-    image: "https://images.pexels.com/photos/31071253/pexels-photo-31071253.jpeg?auto=compress&cs=tinysrgb&w=400" },
-  { key: "Sports", label: "Sports", icon: "basketball", color: "#14B8A6",
-    image: "https://images.unsplash.com/photo-1599158150601-1417ebbaafdd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHw0fHxzdGFkaXVtfGVufDB8fHx8MTc4NDQ4MTk1NXww&ixlib=rb-4.1.0&q=85&w=400" },
-  { key: "Other", label: "Other", icon: "grid", color: "#64748B",
-    image: "https://images.pexels.com/photos/2263436/pexels-photo-2263436.jpeg?auto=compress&cs=tinysrgb&w=400" },
+const CATEGORIES: { key: string; label: string; icon: any; color: string }[] = [
+  { key: "All", label: "All", icon: "sparkles-outline", color: "#FF6FA8" },
+  { key: "Music", label: "Music", icon: "musical-notes-outline", color: "#B9A2FF" },
+  { key: "Art", label: "Art", icon: "color-palette-outline", color: "#FDAA6B" },
+  { key: "Tech", label: "Tech", icon: "hardware-chip-outline", color: "#7DD3FC" },
+  { key: "Food", label: "Food", icon: "restaurant-outline", color: "#FF8A8A" },
+  { key: "Sports", label: "Sports", icon: "basketball-outline", color: "#5EEAD4" },
+  { key: "Other", label: "Other", icon: "grid-outline", color: "#CBD5E1" },
 ];
-const DEFAULT_LOC = { lat: 37.7749, lng: -122.4194, label: "San Francisco (default)" };
+
+const DEFAULT_LOC = { lat: 19.076, lng: 72.8777, label: "Mumbai" };
+// Re-label the location automatically once the phone is this far away.
+const LOCATION_REFRESH_KM = 5;
+const MOVE_CHECK_INTERVAL_MS = 10 * 60_000;
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const CAROUSEL_WIDTH = Math.min(SCREEN_WIDTH - 48, 320);
+const CAROUSEL_WIDTH = Math.min(SCREEN_WIDTH - 40, 340);
 
-type Event = {
+type Event = CapacityFields & {
   id: string;
   title: string;
   description: string;
   category: string;
   image_url?: string;
   date: string;
+  start_date?: string;
+  end_date?: string;
   location_name: string;
   latitude: number;
   longitude: number;
@@ -73,6 +78,77 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
+function priceLabel(p: number) {
+  return p > 0 ? `₹${p.toFixed(0)}` : "Free";
+}
+
+/**
+ * Round category bubble. Selected → tinted ring, springs up ~6% and the icon
+ * does a small wiggle; press → quick squash.
+ */
+function CategoryBubble({
+  icon, label, accent, active, onPress, testID, colors,
+}: {
+  icon: any;
+  label: string;
+  accent: string;
+  active: boolean;
+  onPress: () => void;
+  testID?: string;
+  colors: Colors;
+}) {
+  const scale = useSharedValue(1);
+  const wiggle = useSharedValue(0);
+
+  useEffect(() => {
+    scale.value = withSpring(active ? 1.06 : 1, { damping: 12, stiffness: 220 });
+    if (active) {
+      wiggle.value = withSequence(
+        withTiming(-1, { duration: 90 }),
+        withTiming(1, { duration: 120 }),
+        withSpring(0, { damping: 10 })
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  const container = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const iconAnim = useAnimatedStyle(() => ({ transform: [{ rotate: `${wiggle.value * 10}deg` }] }));
+
+  return (
+    <Animated.View style={container}>
+      <Pressable
+        testID={testID}
+        onPress={() => {
+          scale.value = withSequence(withTiming(0.9, { duration: 80 }), withSpring(active ? 1.06 : 1, { damping: 10, stiffness: 240 }));
+          onPress();
+        }}
+        style={{ alignItems: "center", width: 64 }}
+      >
+        <View
+          style={{
+            width: 56, height: 56, borderRadius: 28,
+            alignItems: "center", justifyContent: "center",
+            backgroundColor: accent + (active ? "33" : "26"),
+            borderWidth: active ? 2 : 0,
+            borderColor: accent,
+          }}
+        >
+          <Animated.View style={iconAnim}>
+            <Ionicons name={icon} size={24} color={accent} />
+          </Animated.View>
+        </View>
+        <Text
+          numberOfLines={1}
+          style={{ marginTop: 6, fontSize: 12, color: active ? accent : colors.onSurface, fontWeight: active ? "800" : "600" }}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function Discover() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -86,6 +162,8 @@ export default function Discover() {
   const [locModalOpen, setLocModalOpen] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const router = useRouter();
+  const { user } = useAuth();
+  const { quota } = useQuota(!!user);
 
   const load = useCallback(async () => {
     try {
@@ -105,6 +183,52 @@ export default function Discover() {
     }
   }, [location, radiusKm, category, search]);
 
+  // Resolve GPS coordinates to the real area name ("Bandra West, Mumbai")
+  // and remember it. Falls back to "Near you" if no geocoder answers.
+  const applyGpsLocation = useCallback(async (lat: number, lng: number) => {
+    const label = await areaNameFor(lat, lng);
+    const loc = { lat, lng, label };
+    setLocation(loc);
+    await storage.setItem("gs_location", JSON.stringify(loc));
+  }, []);
+
+  // Auto-refresh when the phone has moved far from the saved location
+  // (e.g. the user travelled to another city). Uses the phone's last known
+  // position (no new GPS fix, no network) and checks at most every 10 min,
+  // on screen focus and when the app returns to the foreground. The area
+  // name is only looked up again after a real move — and even then the
+  // geocode cache usually answers.
+  const locationRef = useRef(location);
+  useEffect(() => { locationRef.current = location; }, [location]);
+  const lastMoveCheck = useRef(0);
+  const checkMoved = useCallback(async () => {
+    if (Platform.OS === "web") return;
+    const now = Date.now();
+    if (now - lastMoveCheck.current < MOVE_CHECK_INTERVAL_MS) return;
+    lastMoveCheck.current = now;
+    try {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (perm.status !== "granted") return; // never prompt from a background check
+      const pos =
+        (await Location.getLastKnownPositionAsync({ maxAge: 15 * 60_000 })) ??
+        (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low }));
+      if (!pos) return;
+      const cur = locationRef.current;
+      const moved = distanceKm(cur.lat, cur.lng, pos.coords.latitude, pos.coords.longitude);
+      if (moved >= LOCATION_REFRESH_KM) {
+        await applyGpsLocation(pos.coords.latitude, pos.coords.longitude);
+      }
+    } catch (e) {
+      console.log("Location move check failed", e);
+    }
+  }, [applyGpsLocation]);
+
+  useFocusEffect(useCallback(() => { checkMoved(); }, [checkMoved]));
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => { if (s === "active") checkMoved(); });
+    return () => sub.remove();
+  }, [checkMoved]);
+
   useEffect(() => {
     // Load saved location; if none saved, silently request current location.
     (async () => {
@@ -117,6 +241,10 @@ export default function Discover() {
           const parsed = JSON.parse(savedStr);
           if (parsed && parsed.lat && parsed.lng) {
             setLocation(parsed);
+            // Older saves stored a generic label — upgrade it to the real area name.
+            if (!parsed.label || parsed.label === "Your current location") {
+              applyGpsLocation(parsed.lat, parsed.lng);
+            }
             return;
           }
         } catch {}
@@ -127,11 +255,7 @@ export default function Discover() {
         if (Platform.OS === "web") {
           if (typeof navigator !== "undefined" && navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
-                setLocation(newLoc);
-                storage.setItem("gs_location", JSON.stringify(newLoc));
-              },
+              (pos) => { applyGpsLocation(pos.coords.latitude, pos.coords.longitude); },
               () => { /* silent fallback to DEFAULT_LOC */ },
               { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
             );
@@ -147,9 +271,7 @@ export default function Discover() {
         }
         if (status !== "granted") return; // silent fallback to DEFAULT_LOC
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
-        setLocation(newLoc);
-        await storage.setItem("gs_location", JSON.stringify(newLoc));
+        await applyGpsLocation(pos.coords.latitude, pos.coords.longitude);
       } catch (e) {
         console.log("Auto-locate failed", e);
       }
@@ -171,9 +293,7 @@ export default function Discover() {
         const pos: GeolocationPosition = await new Promise((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
         });
-        const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label: "Your current location" };
-        setLocation(newLoc);
-        await storage.setItem("gs_location", JSON.stringify(newLoc));
+        await applyGpsLocation(pos.coords.latitude, pos.coords.longitude);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         return;
       }
@@ -203,10 +323,7 @@ export default function Discover() {
       }
 
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const label = "Your current location";
-      const newLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude, label };
-      setLocation(newLoc);
-      await storage.setItem("gs_location", JSON.stringify(newLoc));
+      await applyGpsLocation(pos.coords.latitude, pos.coords.longitude);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (e) {
       console.log("GPS error", e);
@@ -260,26 +377,42 @@ export default function Discover() {
     }
   };
 
+  const initial = (user?.name || "?").trim().charAt(0).toUpperCase();
+  const att = quota?.attendee;
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      {/* Sticky header */}
-      <View style={styles.header}>
+      <GlowBackground />
+      <ScrollView
+        contentContainerStyle={styles.page}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />}
+      >
+        {/* Header: location + radius, avatar */}
         <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.greeting}>Discover</Text>
-            <Pressable
-              style={styles.locPill}
-              onPress={() => setLocModalOpen(true)}
-              testID="location-pill"
-            >
-              <Ionicons name="location" size={14} color={colors.brand} />
-              <Text style={styles.locText} numberOfLines={1}>
-                {location.label} · {radiusKm}km
-              </Text>
-              <Ionicons name="chevron-down" size={14} color={colors.muted} />
-            </Pressable>
-          </View>
+          <PressableScale style={styles.locBtn} onPress={() => setLocModalOpen(true)} testID="location-pill">
+            <View style={styles.locIcon}>
+              <Ionicons name="location" size={16} color={colors.brand} />
+            </View>
+            <View style={{ flexShrink: 1 }}>
+              <Text style={styles.locEyebrow}>Events near</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <Text style={styles.locText} numberOfLines={1}>
+                  {location.label} · {radiusKm} km
+                </Text>
+                <Ionicons name="chevron-down" size={14} color={colors.muted} />
+              </View>
+            </View>
+          </PressableScale>
+          <PressableScale style={styles.avatar} onPress={() => router.push("/(consumer)/profile" as any)} accessibilityLabel="Profile">
+            <Text style={styles.avatarText}>{initial}</Text>
+          </PressableScale>
         </View>
+
+        <Text style={styles.h1}>
+          Where's the <Text style={{ color: colors.brand, fontFamily: fonts.display, fontWeight: "800" }}>vibe</Text>{"\n"}tonight?
+        </Text>
 
         <View style={styles.searchBox}>
           <Ionicons name="search" size={18} color={colors.muted} />
@@ -293,198 +426,204 @@ export default function Discover() {
             onSubmitEditing={load}
             returnKeyType="search"
           />
+          {search.length > 0 ? (
+            <Pressable onPress={() => setSearch("")} hitSlop={10} accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </Pressable>
+          ) : null}
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.catRow}
-        >
-          {CATEGORIES.map((c) => {
-            const active = category === c.key;
-            return (
-              <View key={c.key} style={styles.catCardShadow}>
-                <Pressable
-                  testID={`chip-${c.key}`}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setCategory(c.key);
-                  }}
-                  style={[styles.catCard, { backgroundColor: c.color }, active && styles.catCardActive]}
-                >
-                  <Image
-                    source={c.image}
-                    style={StyleSheet.absoluteFill}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    transition={0}
-                    recyclingKey={c.key}
-                  />
-                  <View style={styles.catOverlay} />
-                  <View style={styles.catIconWrap}>
-                    <Ionicons name={c.icon} size={20} color="#FFFFFF" />
-                  </View>
-                  {active && (
-                    <View style={styles.catCheck}>
-                      <Ionicons name="checkmark" size={12} color={colors.onBrandPrimary} />
-                    </View>
-                  )}
-                  <Text style={styles.catCardLabel} numberOfLines={1}>{c.label}</Text>
-                </Pressable>
-              </View>
-            );
-          })}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catRow} style={styles.catScroll}>
+          {CATEGORIES.map((c) => (
+            <CategoryBubble
+              key={c.key}
+              testID={`chip-${c.key}`}
+              icon={c.icon}
+              label={c.label}
+              accent={c.color}
+              active={category === c.key}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setCategory(c.key);
+              }}
+              colors={colors}
+            />
+          ))}
         </ScrollView>
-      </View>
 
-      {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={colors.brand} /></View>
-      ) : events.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="calendar-outline" size={64} color={colors.borderStrong} />
-          <Text style={styles.emptyTitle}>No events in your area</Text>
-          <Text style={styles.emptySub}>Try expanding your radius or changing category.</Text>
-          <Pressable style={styles.emptyBtn} onPress={() => setLocModalOpen(true)} testID="expand-radius-btn">
-            <Text style={styles.emptyBtnText}>Adjust radius</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
-          showsVerticalScrollIndicator={false}
-        >
-          {featuredEvents.length > 0 && (
-            <View style={styles.featuredSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionTitleRow}>
-                  <Ionicons name="flame" size={16} color="#F59E0B" />
-                  <Text style={styles.sectionTitle}>Featured</Text>
+        {/* Free-tier offer banner — shown above the feed so it's visible even
+            when the feed is empty (fresh users need to see the perk first). */}
+        {att && att.free_bookings_remaining > 0 && !loading && (
+          <Animated.View entering={FadeInDown.duration(350)} style={styles.offerBanner} testID="offer-banner">
+            <View style={styles.offerIcon}>
+              <Ionicons name="gift" size={20} color={colors.onLime} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.offerTitle}>Your first {att.free_booking_limit} bookings are FREE</Text>
+              <Text style={styles.offerSub}>
+                {att.free_bookings_remaining} of {att.free_booking_limit} free booking{att.free_bookings_remaining === 1 ? "" : "s"} left · no platform fee
+              </Text>
+            </View>
+          </Animated.View>
+        )}
+
+        {loading ? (
+          <View style={{ gap: spacing.md, marginTop: spacing.sm }}>
+            <Skeleton width={120} height={18} />
+            <SkeletonCard height={210} />
+            <SkeletonRow />
+            <SkeletonRow />
+          </View>
+        ) : events.length === 0 ? (
+          <EmptyState
+            icon="map-outline"
+            title="No events in your area"
+            subtitle="Try expanding your radius or changing category."
+            actionLabel="Adjust radius"
+            onAction={() => setLocModalOpen(true)}
+            actionTestID="expand-radius-btn"
+          />
+        ) : (
+          <>
+            {featuredEvents.length > 0 && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionTitleRow}>
+                    <Ionicons name="flame" size={16} color={colors.warning} />
+                    <Text style={styles.sectionTitle}>Featured</Text>
+                  </View>
+                  <Text style={styles.sectionCount}>{featuredEvents.length} boosted</Text>
                 </View>
-                <Text style={styles.sectionCount}>{featuredEvents.length} boosted</Text>
+                <ScrollView
+                  ref={carouselRef}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  snapToInterval={CAROUSEL_ITEM_STEP}
+                  decelerationRate="fast"
+                  contentContainerStyle={styles.carousel}
+                  style={styles.carouselScroll}
+                  onScroll={onCarouselScroll}
+                  scrollEventThrottle={32}
+                  onScrollBeginDrag={() => { userInteractingRef.current = true; }}
+                  onScrollEndDrag={() => {
+                    // Resume auto-scroll after 5s of inactivity
+                    setTimeout(() => { userInteractingRef.current = false; }, 5000);
+                  }}
+                >
+                  {featuredEvents.map((e) => {
+                    const urg = urgencyOf(e);
+                    const going = goingLabel(e);
+                    return (
+                      <PressableScale
+                        key={e.id}
+                        testID={`featured-card-${e.id}`}
+                        style={styles.featuredCard}
+                        onPress={() => router.push(`/event/${e.id}` as any)}
+                      >
+                        <Image source={e.image_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={250} />
+                        <LinearGradient
+                          colors={["rgba(13,11,26,0.15)", "rgba(13,11,26,0)", "rgba(13,11,26,0.92)"]}
+                          locations={[0, 0.35, 1]}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <View style={styles.featuredTop}>
+                          <Tag label="FEATURED" tone="lime" icon="flame" />
+                          <Tag label={priceLabel(e.price)} tone="dark" />
+                        </View>
+                        <View style={styles.featuredBottom}>
+                          <View style={{ flexDirection: "row", gap: 6, marginBottom: 2 }}>
+                            {urg ? <Tag label={urg.label} tone={urg.tone} /> : null}
+                            {going ? <Tag label={going} tone="dark" icon="people" /> : null}
+                          </View>
+                          <Text style={styles.featuredCategory}>{e.category}</Text>
+                          <Text style={styles.featuredTitle} numberOfLines={2}>{e.title}</Text>
+                          <Text style={styles.featuredMeta} numberOfLines={1}>
+                            {formatDate(e.start_date || e.date)} · {e.distance_km != null ? `${e.distance_km.toFixed(1)} km` : e.location_name}
+                          </Text>
+                        </View>
+                      </PressableScale>
+                    );
+                  })}
+                </ScrollView>
+                {featuredEvents.length > 1 && (
+                  <View style={styles.dotsRow} testID="carousel-dots">
+                    {featuredEvents.map((_, i) => (
+                      <View key={i} style={[styles.dot, i === carouselIndex && styles.dotActive]} />
+                    ))}
+                  </View>
+                )}
               </View>
-              <ScrollView
-                ref={carouselRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                snapToInterval={CAROUSEL_WIDTH + spacing.md}
-                decelerationRate="fast"
-                contentContainerStyle={styles.carousel}
-                onScroll={onCarouselScroll}
-                scrollEventThrottle={32}
-                onScrollBeginDrag={() => { userInteractingRef.current = true; }}
-                onScrollEndDrag={() => {
-                  // Resume auto-scroll after 5s of inactivity
-                  setTimeout(() => { userInteractingRef.current = false; }, 5000);
-                }}
-              >
-                {featuredEvents.map((e) => (
-                  <Pressable
-                    key={e.id}
-                    testID={`featured-card-${e.id}`}
-                    style={styles.featuredCard}
+            )}
+
+            {regularEvents.length > 0 && (
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>All events</Text>
+                <Text style={styles.sectionCount}>{regularEvents.length} near you</Text>
+              </View>
+            )}
+
+            {regularEvents.map((e, i) => {
+              const urg = urgencyOf(e);
+              const going = goingLabel(e);
+              const when = e.start_date || e.date;
+              return (
+                <Animated.View key={e.id} entering={FadeInDown.delay(Math.min(i, 8) * 50).duration(380)}>
+                  <PressableScale
+                    testID={`event-card-${e.id}`}
+                    style={styles.card}
                     onPress={() => router.push(`/event/${e.id}` as any)}
                   >
-                    <Image source={e.image_url} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
-                    <LinearGradient
-                      colors={["rgba(31,41,55,0.15)", "rgba(31,41,55,0.85)"]}
-                      style={StyleSheet.absoluteFill}
-                    />
-                    <View style={styles.featuredTop}>
-                      <View style={styles.featuredBadgeBig}>
-                        <Ionicons name="flame" size={12} color={colors.onBrandPrimary} />
-                        <Text style={styles.featuredBadgeText}>Featured</Text>
-                      </View>
-                      <View style={styles.featuredPricePill}>
-                        <Text style={styles.featuredPriceText}>
-                          {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
+                    <View style={styles.thumbWrap}>
+                      <Image source={e.image_url} style={styles.thumb} contentFit="cover" transition={200} />
+                      <View style={styles.thumbDate}>
+                        <Text style={styles.thumbDateText}>
+                          {new Date(when).toLocaleDateString("en-US", { day: "numeric", month: "short" }).toUpperCase()}
                         </Text>
                       </View>
                     </View>
-                    <View style={styles.featuredBottom}>
-                      <Text style={styles.featuredCategoryText}>{e.category}</Text>
-                      <Text style={styles.featuredTitle} numberOfLines={2}>{e.title}</Text>
-                      <View style={styles.featuredMetaRow}>
-                        <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.85)" />
-                        <Text style={styles.featuredMetaText}>{formatDate(e.date)}</Text>
-                        <View style={styles.featuredMetaDot} />
-                        <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
-                        <Text style={styles.featuredMetaText} numberOfLines={1}>
-                          {e.distance_km != null ? `${e.distance_km.toFixed(1)}km` : e.location_name}
-                        </Text>
+                    <View style={styles.cardBody}>
+                      <Text style={styles.cardCategory}>{e.category}</Text>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{e.title}</Text>
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {formatDate(when)} · {formatTime(when)}
+                      </Text>
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {e.location_name}
+                        {e.distance_km != null ? ` · ${e.distance_km.toFixed(1)} km` : ""}
+                      </Text>
+                      <View style={styles.cardFooter}>
+                        <Text style={styles.price}>{priceLabel(e.price)}</Text>
+                        <View style={styles.typeChip} testID={`event-type-chip-${e.id}`}>
+                          <Ionicons name={eventTypeIcon(e.booking_type) as any} size={11} color={colors.violetText} />
+                          <Text style={styles.typeChipText}>{eventTypeShortLabel(e.booking_type)}</Text>
+                        </View>
+                        {urg ? (
+                          <Tag label={urg.label} tone={urg.tone} />
+                        ) : going ? (
+                          <Text style={styles.going}>{going}</Text>
+                        ) : null}
                       </View>
                     </View>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              {featuredEvents.length > 1 && (
-                <View style={styles.dotsRow} testID="carousel-dots">
-                  {featuredEvents.map((_, i) => (
-                    <View
-                      key={i}
-                      style={[styles.dot, i === carouselIndex && styles.dotActive]}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>
-          )}
+                  </PressableScale>
+                </Animated.View>
+              );
+            })}
+          </>
+        )}
+        <View style={{ height: spacing.xl }} />
+      </ScrollView>
 
-          {regularEvents.length > 0 && (
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>All events</Text>
-              <Text style={styles.sectionCount}>{regularEvents.length} near you</Text>
-            </View>
-          )}
-
-          {regularEvents.map((e) => (
-            <Pressable
-              key={e.id}
-              testID={`event-card-${e.id}`}
-              style={styles.card}
-              onPress={() => router.push(`/event/${e.id}` as any)}
-            >
-              <View style={styles.imgWrap}>
-                <Image source={e.image_url} style={styles.img} contentFit="cover" transition={200} />
-                <LinearGradient
-                  colors={["transparent", "rgba(31,41,55,0.75)"]}
-                  style={styles.imgOverlay}
-                />
-                <View style={styles.catBadge}>
-                  <Text style={styles.catBadgeText}>{e.category}</Text>
-                </View>
-                <View style={styles.priceBadge}>
-                  <Text style={styles.priceBadgeText}>
-                    {e.price > 0 ? `₹${e.price.toFixed(0)}` : "Free"}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardTitle} numberOfLines={2}>{e.title}</Text>
-                <View style={styles.metaRow}>
-                  <Ionicons name="calendar-outline" size={14} color={colors.muted} />
-                  <Text style={styles.metaText}>{formatDate(e.date)} · {formatTime(e.date)}</Text>
-                </View>
-                <View style={styles.metaRow}>
-                  <Ionicons name="location-outline" size={14} color={colors.muted} />
-                  <Text style={styles.metaText} numberOfLines={1}>
-                    {e.location_name}
-                    {e.distance_km != null ? ` · ${e.distance_km.toFixed(1)}km` : ""}
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          ))}
-          <View style={{ height: spacing["2xl"] }} />
-        </ScrollView>
-      )}
-
-      {/* Location & radius modal */}
+      {/* Location & radius sheet */}
       <Modal visible={locModalOpen} animationType="slide" transparent onRequestClose={() => setLocModalOpen(false)}>
         <Pressable style={styles.modalBg} onPress={() => setLocModalOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Location & Radius</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={styles.sheetTitle}>Location & Radius</Text>
+              <Pressable onPress={() => setLocModalOpen(false)} style={styles.iconBtn} accessibilityLabel="Close" hitSlop={6}>
+                <Ionicons name="close" size={18} color={colors.onSurface} />
+              </Pressable>
+            </View>
 
             <View style={styles.locInfoRow}>
               <View style={styles.locInfoIcon}>
@@ -494,19 +633,22 @@ export default function Discover() {
                 <Text style={styles.locInfoLabel}>Current location</Text>
                 <Text style={styles.locInfoValue} numberOfLines={1}>{location.label}</Text>
               </View>
-              <Pressable onPress={requestGPS} testID="refresh-gps-btn" disabled={gpsLoading} style={styles.locRefreshBtn} hitSlop={8}>
+              <Pressable onPress={requestGPS} testID="refresh-gps-btn" disabled={gpsLoading} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Use my current location">
                 {gpsLoading ? (
-                  <ActivityIndicator size="small" color={colors.brand} />
+                  <ActivityIndicator size="small" color={colors.lime} />
                 ) : (
-                  <Ionicons name="refresh" size={18} color={colors.brand} />
+                  <Ionicons name="locate" size={18} color={colors.lime} />
                 )}
               </Pressable>
             </View>
 
-            <Text style={styles.radiusLabel}>Search radius</Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: spacing.sm }}>
+              <Text style={styles.radiusLabel}>Search radius</Text>
+              <Text style={styles.radiusValue}>{radiusKm} km</Text>
+            </View>
             <View style={styles.radiusRow}>
               {[5, 10, 25, 50, 100].map((r) => (
-                <Pressable
+                <PressableScale
                   key={r}
                   testID={`radius-${r}`}
                   style={[styles.radiusChip, radiusKm === r && styles.radiusChipActive]}
@@ -515,13 +657,11 @@ export default function Discover() {
                   <Text style={[styles.radiusChipText, radiusKm === r && styles.radiusChipTextActive]}>
                     {r} km
                   </Text>
-                </Pressable>
+                </PressableScale>
               ))}
             </View>
 
-            <Pressable style={styles.doneBtn} onPress={() => setLocModalOpen(false)} testID="loc-done-btn">
-              <Text style={styles.doneText}>Done</Text>
-            </Pressable>
+            <Button title="Done" onPress={() => setLocModalOpen(false)} testID="loc-done-btn" style={{ marginTop: spacing.md }} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -531,226 +671,150 @@ export default function Discover() {
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderBottomColor: colors.divider,
-    borderBottomWidth: 1,
-  },
-  headerRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm },
-  greeting: { fontSize: 28, fontWeight: "700", color: colors.onSurface, marginBottom: 4 },
-  locPill: {
-    flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
-  },
-  locText: { fontSize: 13, color: colors.onSurfaceTertiary, maxWidth: 260 },
-  searchBox: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+  page: { paddingHorizontal: 20, paddingTop: spacing.md, gap: 14 },
+
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  locBtn: { flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1, minHeight: 44 },
+  locIcon: {
+    width: 38, height: 38, borderRadius: 12,
     backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-    height: 44,
-    marginTop: spacing.sm,
+    alignItems: "center", justifyContent: "center",
   },
-  searchInput: { flex: 1, fontSize: 15, color: colors.onSurface },
-  catRow: { gap: spacing.md, paddingVertical: spacing.md, paddingRight: spacing.lg },
-  catCardShadow: {
-    // Outer wrapper carries the shadow ONLY.
-    // Do NOT set overflow:hidden here — it triggers a well-known
-    // Android bug (RN #30039) where elevation + overflow:hidden
-    // hides absolutely-positioned children on some devices.
-    borderRadius: radius.md,
-    ...shadows.card,
-  },
-  catCard: {
-    width: 96, height: 76,
-    borderRadius: radius.md,
-    overflow: "hidden",
-    justifyContent: "flex-end",
-    padding: spacing.sm,
-    flexShrink: 0,
-  },
-  catCardActive: {
-    borderWidth: 2, borderColor: colors.brand,
-  },
-  catOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.35)",
-  },
-  catIconWrap: {
-    position: "absolute", top: 8, left: 8,
-  },
-  catCardLabel: {
-    color: "#FFFFFF", fontSize: 13, fontWeight: "700",
-  },
-  catCheck: {
-    position: "absolute", top: 6, right: 6,
-    width: 20, height: 20, borderRadius: 10,
+  locEyebrow: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: "700" },
+  locText: { fontSize: 16, color: colors.onSurface, fontWeight: "800", maxWidth: 230 },
+  avatar: {
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: colors.brand,
     alignItems: "center", justifyContent: "center",
   },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
-  emptyTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginTop: spacing.md },
-  emptySub: { fontSize: 14, color: colors.muted, textAlign: "center" },
-  emptyBtn: {
-    marginTop: spacing.md,
-    backgroundColor: colors.brandPrimary,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: 12,
-    borderRadius: radius.pill,
-  },
-  emptyBtnText: { color: colors.onBrandPrimary, fontWeight: "600" },
-  list: { padding: spacing.lg, gap: spacing.lg },
-  card: {
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
-    overflow: "hidden",
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  imgWrap: { height: 200, position: "relative" },
-  img: { width: "100%", height: "100%", backgroundColor: colors.surfaceTertiary },
-  imgOverlay: { position: "absolute", left: 0, right: 0, bottom: 0, height: 80 },
-  catBadge: {
-    position: "absolute", top: 12, left: 12,
-    backgroundColor: "rgba(255,255,255,0.95)",
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  catBadgeText: { fontSize: 11, color: "#111827", fontWeight: "600" },
-  priceBadge: {
-    position: "absolute", top: 12, right: 12,
-    backgroundColor: colors.brandPrimary,
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  priceBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
+  avatarText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 16 },
 
-  // Section headings
+  h1: { fontFamily: fonts.display, fontWeight: "800", fontSize: 26, lineHeight: 32, color: colors.onSurface, letterSpacing: -0.3 },
+
+  searchBox: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 16,
+    paddingHorizontal: spacing.lg,
+    height: 52,
+  },
+  searchInput: { flex: 1, fontSize: 15, color: colors.onSurface, fontWeight: "500" },
+
+  catScroll: { marginHorizontal: -20 },
+  catRow: { gap: 8, paddingHorizontal: 20, paddingVertical: 4 },
+
+  offerBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    backgroundColor: colors.lime + "1F",
+    borderWidth: 1, borderColor: colors.lime + "59",
+    borderRadius: 18, padding: spacing.md,
+  },
+  offerIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.lime,
+  },
+  offerTitle: { color: colors.onSurface, fontWeight: "800", fontSize: 14 },
+  offerSub: { color: colors.soft, fontSize: 12, marginTop: 2 },
+
   sectionHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginBottom: spacing.md, marginTop: spacing.sm,
+    marginTop: spacing.sm,
   },
   sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  sectionTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
-  sectionCount: { fontSize: 12, color: colors.muted, fontWeight: "500" },
+  sectionTitle: { fontFamily: fonts.display, fontSize: 16, fontWeight: "700", color: colors.onSurface },
+  sectionCount: { fontSize: 13, color: colors.muted, fontWeight: "700" },
 
-  // Featured carousel
-  featuredSection: { marginBottom: spacing.lg },
-  carousel: { gap: spacing.md, paddingRight: spacing.lg },
+  carouselScroll: { marginHorizontal: -20, marginTop: spacing.md },
+  carousel: { gap: spacing.md, paddingHorizontal: 20, paddingBottom: 18 },
   featuredCard: {
     width: CAROUSEL_WIDTH, height: 220,
-    borderRadius: radius.lg,
+    borderRadius: 24,
     overflow: "hidden",
-    ...shadows.floating,
-    flexShrink: 0,
+    backgroundColor: colors.surfaceTertiary,
     justifyContent: "space-between",
+    ...shadows.glow,
   },
-  featuredTop: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start",
-    padding: spacing.md,
-  },
-  featuredBadgeBig: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "#F59E0B",
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: radius.pill,
-  },
-  featuredBadgeText: { fontSize: 11, color: colors.onBrandPrimary, fontWeight: "700" },
-  featuredPricePill: {
-    backgroundColor: "rgba(255,255,255,0.95)",
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: radius.pill,
-  },
-  featuredPriceText: { fontSize: 11, color: "#111827", fontWeight: "700" },
-  featuredBottom: { padding: spacing.md, gap: 4 },
-  featuredCategoryText: {
-    color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600",
-    textTransform: "uppercase", letterSpacing: 0.5,
-  },
-  featuredTitle: {
-    color: "#FFFFFF", fontSize: 20, fontWeight: "700", lineHeight: 24,
-  },
-  featuredMetaRow: {
-    flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4,
-  },
-  featuredMetaText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "500" },
-  featuredMetaDot: {
-    width: 3, height: 3, borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.6)", marginHorizontal: 4,
-  },
-  dotsRow: {
-    flexDirection: "row", justifyContent: "center", alignItems: "center",
-    gap: 6, marginTop: spacing.md,
-  },
-  dot: {
-    width: 6, height: 6, borderRadius: 3,
-    backgroundColor: colors.borderStrong,
-  },
-  dotActive: {
-    width: 20, backgroundColor: colors.brand,
-  },
-  cardBody: { padding: spacing.lg, gap: 6 },
-  cardTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginBottom: 4 },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  metaText: { fontSize: 13, color: colors.muted, flex: 1 },
+  featuredTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", padding: 12 },
+  featuredBottom: { padding: 14, gap: 3 },
+  featuredCategory: { color: colors.accentText, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  featuredTitle: { fontFamily: fonts.display, color: "#FFFFFF", fontSize: 18, fontWeight: "700", lineHeight: 23 },
+  featuredMeta: { color: "#CFC9EA", fontSize: 12, fontWeight: "600" },
+  dotsRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.borderStrong },
+  dotActive: { width: 18, backgroundColor: colors.brand },
 
-  modalBg: {
-    flex: 1, backgroundColor: "rgba(17,24,39,0.5)", justifyContent: "flex-end",
-  },
-  sheet: {
+  card: {
+    flexDirection: "row", gap: 12, alignItems: "center",
     backgroundColor: colors.surfaceSecondary,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: 20, padding: 10,
+  },
+  thumbWrap: { width: 88, height: 104, borderRadius: 14, overflow: "hidden", backgroundColor: colors.surfaceTertiary },
+  thumb: { width: "100%", height: "100%" },
+  thumbDate: {
+    position: "absolute", left: 5, bottom: 5,
+    backgroundColor: colors.lime, borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  thumbDateText: { color: colors.onLime, fontSize: 10, fontWeight: "800" },
+  cardBody: { flex: 1, gap: 3 },
+  cardCategory: { fontSize: 10, color: colors.accentText, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1 },
+  cardTitle: { fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  metaText: { fontSize: 12, color: colors.muted },
+  cardFooter: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" },
+  price: { fontSize: 14, fontWeight: "800", color: colors.lime },
+  typeChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  typeChipText: { fontSize: 11, color: colors.violetText, fontWeight: "700" },
+  going: { fontSize: 11, color: colors.soft, fontWeight: "700" },
+
+  modalBg: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.sheet,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1, borderColor: colors.border,
     padding: spacing.xl,
-    paddingBottom: 48,
+    paddingTop: 12,
+    paddingBottom: 40,
     gap: spacing.md,
   },
-  sheetHandle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong,
-    alignSelf: "center",
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, alignSelf: "center", marginBottom: 4 },
+  sheetTitle: { fontFamily: fonts.display, fontSize: 18, fontWeight: "700", color: colors.onSurface },
+  iconBtn: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center", justifyContent: "center",
   },
-  sheetTitle: { fontSize: 20, fontWeight: "700", color: colors.onSurface },
-  gpsBtn: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    backgroundColor: colors.brandTertiary,
-    padding: spacing.md, borderRadius: radius.md,
-  },
-  gpsText: { color: colors.onBrandTertiary, fontWeight: "600" },
-  currentLoc: { fontSize: 14, color: colors.muted },
   locInfoRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    backgroundColor: colors.surfaceTertiary,
-    padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, borderRadius: 18,
   },
   locInfoIcon: {
-    width: 36, height: 36, borderRadius: 12,
-    backgroundColor: colors.brandTertiary,
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.brand + "29",
     alignItems: "center", justifyContent: "center",
   },
-  locInfoLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 },
-  locInfoValue: { fontSize: 14, color: colors.onSurface, fontWeight: "600", marginTop: 2 },
-  locRefreshBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: colors.surfaceSecondary,
-    alignItems: "center", justifyContent: "center",
-  },
-  radiusLabel: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500", marginTop: spacing.sm },
+  locInfoLabel: { fontSize: 11, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6, fontWeight: "700" },
+  locInfoValue: { fontSize: 15, color: colors.onSurface, fontWeight: "800", marginTop: 2 },
+  radiusLabel: { fontSize: 12, color: colors.muted, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  radiusValue: { fontFamily: fonts.display, fontSize: 20, fontWeight: "800", color: colors.brand },
   radiusRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   radiusChip: {
-    paddingHorizontal: spacing.lg, paddingVertical: 10,
+    paddingHorizontal: spacing.lg, height: 40, justifyContent: "center",
     borderRadius: radius.pill,
     borderWidth: 1, borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceSecondary,
   },
-  radiusChipActive: { backgroundColor: colors.onSurface, borderColor: colors.onSurface },
-  radiusChipText: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500" },
-  radiusChipTextActive: { color: colors.surface, fontWeight: "600" },
-  doneBtn: {
-    marginTop: spacing.md,
-    backgroundColor: colors.brandPrimary,
-    borderRadius: radius.pill, paddingVertical: 14, alignItems: "center",
-  },
-  doneText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+  radiusChipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  radiusChipText: { fontSize: 13, color: colors.onSurface, fontWeight: "700" },
+  radiusChipTextActive: { color: colors.onBrandPrimary, fontWeight: "800" },
 });

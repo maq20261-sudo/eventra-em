@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, Modal, Pressable, ActivityIndicator, Platform,
-} from "react-native";
+import { View, StyleSheet, Modal, Pressable, ActivityIndicator, Platform } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,12 +28,13 @@ function buildHtml(lat: number, lng: number): string {
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
-  body { background: #F3F4F6; }
-  .leaflet-container { background: #F3F4F6; }
+  body { background: #1E1838; }
+  .leaflet-container { background: #1E1838; }
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(0.8) contrast(0.9) saturate(0.6); }
   .pin-wrap { filter: drop-shadow(0 4px 6px rgba(0,0,0,0.25)); }
   .pin {
     width: 32px; height: 32px; border-radius: 50%;
-    background: #059669; border: 4px solid #FFFFFF;
+    background: #FF3D8B; border: 4px solid #14061D;
     display: flex; align-items: center; justify-content: center;
     color: white; font-size: 16px; font-weight: 700;
   }

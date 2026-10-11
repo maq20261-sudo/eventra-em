@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { View, StyleSheet, Pressable, Text, Platform, Linking } from "react-native";
+import { View, StyleSheet, Pressable, Platform, Linking } from "react-native";
+import { Text } from "@/src/ui/Text";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -22,24 +23,18 @@ function buildHtml(lat: number, lng: number, label: string): string {
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
-  body { background: #F3F4F6; }
-  .leaflet-container { background: #F3F4F6; }
+  body { background: #1E1838; }
+  .leaflet-container { background: #1E1838; }
+  /* Dark map to match the Neon Night theme (same OSM tiles, recoloured). */
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(0.8) contrast(0.9) saturate(0.6); }
   .pin-wrap {
     display: flex; flex-direction: column; align-items: center;
     filter: drop-shadow(0 4px 6px rgba(0,0,0,0.25));
   }
   .pin {
-    width: 32px; height: 32px; border-radius: 50%;
-    background: #059669; border: 4px solid #FFFFFF;
-    display: flex; align-items: center; justify-content: center;
-    color: white; font-size: 16px; font-weight: 700;
-    font-family: -apple-system, sans-serif;
-  }
-  .pin::after {
-    content: ""; position: absolute; margin-top: 36px;
-    width: 0; height: 0;
-    border-left: 6px solid transparent; border-right: 6px solid transparent;
-    border-top: 10px solid #FFFFFF;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #FF3D8B; border: 4px solid #14061D;
+    box-shadow: 0 0 0 6px rgba(255,61,139,0.35), 0 0 24px rgba(255,61,139,0.8);
   }
 </style>
 </head>
@@ -53,9 +48,9 @@ function buildHtml(lat: number, lng: number, label: string): string {
   }).addTo(map);
   var icon = L.divIcon({
     className: 'pin-wrap',
-    html: '<div class="pin">📍</div>',
-    iconSize: [32, 40],
-    iconAnchor: [16, 40],
+    html: '<div class="pin"></div>',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
   });
   L.marker([${lat}, ${lng}], { icon: icon })
     .addTo(map)
@@ -121,16 +116,18 @@ export default function EventMap({ latitude, longitude, label, height = 200 }: P
 const styles = StyleSheet.create({
   wrap: { gap: spacing.sm },
   mapBox: {
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     overflow: "hidden",
+    borderWidth: 1, borderColor: colors.border,
     backgroundColor: colors.surfaceTertiary,
   },
   web: { flex: 1, backgroundColor: colors.surfaceTertiary },
   dirBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: colors.brandTertiary,
-    paddingVertical: 10, paddingHorizontal: spacing.md,
-    borderRadius: radius.pill, alignSelf: "flex-start",
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1, borderColor: colors.border,
+    height: 40, paddingHorizontal: spacing.lg,
+    borderRadius: 12, alignSelf: "flex-start",
   },
-  dirText: { color: colors.onBrandTertiary, fontWeight: "600", fontSize: 13 },
+  dirText: { color: colors.onSurface, fontWeight: "800", fontSize: 13 },
 });

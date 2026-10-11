@@ -51,6 +51,10 @@ def _resolve_demo_password() -> str:
 
 
 async def main():
+    # This script deletes ALL bookings. Never let it touch production data.
+    if os.environ.get("APP_ENV", "development").lower() == "production":
+        raise SystemExit("seed.py refuses to run with APP_ENV=production (it deletes all bookings).")
+
     client = AsyncIOMotorClient(os.environ['MONGO_URL'])
     db = client[os.environ['DB_NAME']]
 
@@ -167,6 +171,8 @@ async def main():
             "organizer_name": "Aria Events Co.",
             "booked_count": 0,
             "seeded": True,
+            "status": "ACTIVE",
+            "hold_reasons": [],
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
         await db.events.insert_one(e)

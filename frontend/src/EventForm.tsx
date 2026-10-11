@@ -1,20 +1,23 @@
-import { useState, useEffect, useMemo } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Pressable, TextInput,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
-} from "react-native";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import { Text, TextInput } from "@/src/ui/Text";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import * as Location from "expo-location";
 import { api } from "@/src/api";
 import EventMap from "@/src/EventMap";
 import LocationPicker from "@/src/LocationPicker";
+import RazorpayCheckout from "@/src/RazorpayCheckout";
+import { useQuota } from "@/src/hooks/usePricing";
 import * as ImagePicker from "expo-image-picker";
-import { spacing, radius, shadows } from "@/src/theme";
+import { spacing, radius, shadows, fonts } from "@/src/theme";
+import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
+import DateTimeField from "@/src/DateTimeField";
+import LocationSearchField from "@/src/LocationSearchField";
+import { eventStatusMeta } from "@/src/utils/eventStatus";
 
 const CATEGORIES = ["Music", "Art", "Tech", "Food", "Sports", "Other"];
 const BOOKING_TYPES = [
@@ -46,8 +49,9 @@ export default function EventForm({ editId }: Props) {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Music");
   const [imageUrl, setImageUrl] = useState(DEFAULT_IMAGES[0]);
-  const [dateStr, setDateStr] = useState(""); // YYYY-MM-DD
-  const [timeStr, setTimeStr] = useState(""); // HH:MM
+  // Start & End datetime — replaces the old single "date + time" text fields.
+  const [startAt, setStartAt] = useState<Date | null>(null);
+  const [endAt, setEndAt] = useState<Date | null>(null);
   const [locationName, setLocationName] = useState("");
   const [latitude, setLatitude] = useState("37.7749");
   const [longitude, setLongitude] = useState("-122.4194");
@@ -56,48 +60,95 @@ export default function EventForm({ editId }: Props) {
   const [seatRows, setSeatRows] = useState("6");
   const [seatCols, setSeatCols] = useState("8");
   const [totalSeats, setTotalSeats] = useState("100");
-  const [timeSlots, setTimeSlots] = useState<string[]>([""]);
+  // Per-slot capacity: each slot is { time: label, capacity: number }.
+  // Default 50 seats per slot per product requirement.
+  const [timeSlots, setTimeSlots] = useState<{ time: string; capacity: number }[]>([
+    { time: "", capacity: 50 },
+  ]);
+  // Verification workflow status — read-only in the form (admin flips it
+  // in the DB). We surface it as a banner so organizers know when their
+  // event is IN_REVIEW / ON_HOLD / REJECTED and see any hold reasons.
+  const [status, setStatus] = useState<string | null>(null);
+  const [holdReasons, setHoldReasons] = useState<string[]>([]);
+  // Modal state for the "drop-a-pin on map" picker.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Platform-fee flow: for event #6+ the organizer must pay ₹19 first.
+  const { quota, refresh: refreshQuota } = useQuota(true);
+  const [rzpOrder, setRzpOrder] = useState<any | null>(null);
+  const [rzpVisible, setRzpVisible] = useState(false);
+  const pendingBodyRef = useRef<any | null>(null);
+
 
   useEffect(() => {
     if (!editId) return;
+    // CRITICAL: reset ALL fields BEFORE fetching so state from a
+    // previously-open event doesn't bleed into this one. Otherwise
+    // navigating Reserved → General → back to Reserved could leave the
+    // form showing "General Admission" (previous editId's state) until
+    // the async fetch completed. Also handles cases where the new event
+    // is missing fields (e.g., seat_rows) that the old event had.
+    let cancelled = false;
+    setInitialLoading(true);
+    setTitle("");
+    setDescription("");
+    setCategory("Music");
+    setImageUrl(DEFAULT_IMAGES[0]);
+    setStartAt(null);
+    setEndAt(null);
+    setLocationName("");
+    setLatitude("37.7749");
+    setLongitude("-122.4194");
+    setPrice("0");
+    setBookingType("general");
+    setSeatRows("6");
+    setSeatCols("8");
+    setTotalSeats("100");
+    setTimeSlots([{ time: "", capacity: 50 }]);
+    setStatus(null);
+    setHoldReasons([]);
     (async () => {
       try {
         const e = await api.getEvent(editId);
+        if (cancelled) return;
         setTitle(e.title);
         setDescription(e.description);
         setCategory(e.category);
         setImageUrl(e.image_url || DEFAULT_IMAGES[0]);
-        const d = new Date(e.date);
-        setDateStr(d.toISOString().slice(0, 10));
-        setTimeStr(d.toISOString().slice(11, 16));
+        // Prefer new start_date/end_date, fall back to legacy `date`.
+        const startISO = e.start_date || e.date;
+        const endISO = e.end_date || null;
+        if (startISO) setStartAt(new Date(startISO));
+        if (endISO) setEndAt(new Date(endISO));
         setLocationName(e.location_name);
         setLatitude(String(e.latitude));
         setLongitude(String(e.longitude));
         setPrice(String(e.price));
         setBookingType(e.booking_type);
+        setStatus(e.status || null);
+        setHoldReasons(Array.isArray(e.hold_reasons) ? e.hold_reasons : []);
         if (e.seat_rows) setSeatRows(String(e.seat_rows));
         if (e.seat_cols) setSeatCols(String(e.seat_cols));
         if (e.total_seats) setTotalSeats(String(e.total_seats));
-        if (e.time_slots) setTimeSlots(e.time_slots.length ? e.time_slots : [""]);
+        if (e.time_slots) {
+          // Backend returns time_slots as list of labels + slot_capacities map.
+          const labels: string[] = e.time_slots.length ? e.time_slots : [""];
+          const caps = e.slot_capacities || {};
+          const fallbackCap = e.slot_capacity && e.slot_capacity > 1 ? e.slot_capacity : 50;
+          setTimeSlots(
+            labels.map((label: string) => ({
+              time: label,
+              capacity: caps[label] ?? fallbackCap,
+            })),
+          );
+        }
       } catch (err) {
         console.log("Fetch edit error", err);
       } finally {
-        setInitialLoading(false);
+        if (!cancelled) setInitialLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [editId]);
-
-  const useMyGPS = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const pos = await Location.getCurrentPositionAsync({});
-      setLatitude(String(pos.coords.latitude));
-      setLongitude(String(pos.coords.longitude));
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (e) { console.log(e); }
-  };
 
   const pickBanner = async () => {
     try {
@@ -133,18 +184,19 @@ export default function EventForm({ editId }: Props) {
 
   const submit = async () => {
     setError(null);
-    if (!title.trim() || !description.trim() || !dateStr || !timeStr || !locationName.trim()) {
-      setError("Please fill title, description, date, time, and location.");
+    if (!title.trim() || !description.trim() || !startAt || !endAt || !locationName.trim()) {
+      setError("Please fill title, description, start, end, and location.");
       return;
     }
-    const iso = new Date(`${dateStr}T${timeStr}:00`).toISOString();
-    if (isNaN(new Date(iso).getTime())) {
-      setError("Invalid date/time. Use YYYY-MM-DD and HH:MM.");
+    if (endAt.getTime() <= startAt.getTime()) {
+      setError("End date/time must be after the start.");
       return;
     }
     const body: any = {
       title, description, category, image_url: imageUrl,
-      date: iso, location_name: locationName,
+      start_date: startAt.toISOString(),
+      end_date: endAt.toISOString(),
+      location_name: locationName,
       latitude: parseFloat(latitude), longitude: parseFloat(longitude),
       price: parseFloat(price) || 0,
       booking_type: bookingType,
@@ -152,21 +204,47 @@ export default function EventForm({ editId }: Props) {
     if (bookingType === "seat_map") {
       body.seat_rows = parseInt(seatRows) || 6;
       body.seat_cols = parseInt(seatCols) || 8;
+      // Optional: allow time slots on seat_map events too.
+      const cleaned = timeSlots
+        .map((s) => ({ time: s.time.trim(), capacity: 0 }))
+        .filter((s) => s.time.length > 0);
+      if (cleaned.length > 0) body.time_slots = cleaned.map((s) => s.time);
     } else if (bookingType === "general") {
       body.total_seats = parseInt(totalSeats) || 100;
     } else if (bookingType === "time_slot") {
-      body.time_slots = timeSlots.map((s) => s.trim()).filter(Boolean);
-      if (body.time_slots.length === 0) {
+      const cleaned = timeSlots
+        .map((s) => ({ time: s.time.trim(), capacity: Math.max(1, Math.floor(s.capacity || 0)) }))
+        .filter((s) => s.time.length > 0);
+      if (cleaned.length === 0) {
         setError("Please add at least one time slot.");
         return;
       }
+      if (cleaned.some((s) => !s.capacity || s.capacity < 1)) {
+        setError("Each time slot needs at least 1 seat.");
+        return;
+      }
+      body.time_slots = cleaned;
     }
     setLoading(true);
     try {
       if (isEdit && editId) {
         await api.updateEvent(editId, body);
       } else {
-        await api.createEvent(body);
+        try {
+          await api.createEvent(body);
+        } catch (err: any) {
+          // 402 → quota exhausted; kick off the platform-fee Razorpay flow.
+          const detail = err?.detail ?? err?.data?.detail;
+          if (detail?.requires_platform_fee) {
+            const order = await api.createPaymentOrder({ kind: "platform_fee" });
+            pendingBodyRef.current = body;
+            setRzpOrder(order);
+            setRzpVisible(true);
+            setLoading(false);
+            return;
+          }
+          throw err;
+        }
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(organizer)/events" as any);
@@ -175,6 +253,28 @@ export default function EventForm({ editId }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Called after Razorpay checkout succeeds for the ₹19 platform fee.
+  const onPlatformFeeVerified = async (verifyPayload: any) => {
+    setRzpVisible(false);
+    setLoading(true);
+    try {
+      const res = await api.verifyPayment(verifyPayload);
+      const intentId = res?.result?.platform_intent_id;
+      if (!intentId) throw new Error("Platform fee verification failed");
+      const bodyWithFee = { ...(pendingBodyRef.current || {}), platform_intent_id: intentId };
+      await api.createEvent(bodyWithFee);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      refreshQuota();
+      router.replace("/(organizer)/events" as any);
+    } catch (e: any) {
+      setError(e?.message || "Payment succeeded but event creation failed. Please try again.");
+    } finally {
+      setLoading(false);
+      setRzpOrder(null);
+      pendingBodyRef.current = null;
     }
   };
 
@@ -201,6 +301,7 @@ export default function EventForm({ editId }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <GlowBackground />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.header}>
           {isEdit && (
@@ -220,6 +321,77 @@ export default function EventForm({ editId }: Props) {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 200 }}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Verification-workflow banner — only shown in edit mode when
+              the backend surfaces a status. Non-ACTIVE events (IN_REVIEW,
+              ON_HOLD, REJECTED) explain why the event isn't live yet and
+              list any admin-provided hold reasons. */}
+          {isEdit && status && (() => {
+            const meta = eventStatusMeta(status);
+            return (
+              <View
+                style={[styles.statusBanner, { backgroundColor: meta.bg }]}
+                testID="event-status-banner"
+              >
+                <View style={[styles.statusBannerIcon, { backgroundColor: meta.fg + "22" }]}>
+                  <Ionicons name={meta.icon as any} size={18} color={meta.fg} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.statusBannerTitle, { color: meta.fg }]}>
+                    Status · {meta.label}
+                  </Text>
+                  <Text style={[styles.statusBannerSub, { color: meta.fg }]}>
+                    {status === "ACTIVE"
+                      ? "This event is live and visible to attendees."
+                      : status === "IN_REVIEW"
+                      ? "Waiting for admin review — attendees can't see it yet."
+                      : status === "ON_HOLD"
+                      ? "Temporarily paused by admin. See reasons below."
+                      : "Rejected by admin. See reasons below."}
+                  </Text>
+                  {holdReasons.length > 0 && (
+                    <View style={styles.holdReasonsList}>
+                      {holdReasons.map((r, i) => (
+                        <View key={i} style={styles.holdReasonItem}>
+                          <Ionicons name="ellipse" size={5} color={meta.fg} style={{ marginTop: 6 }} />
+                          <Text style={[styles.holdReasonItemText, { color: meta.fg }]}>{r}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          })()}
+
+          {/* Free-tier / platform-fee banner for organizers. */}
+          {!isEdit && quota?.organizer && (
+            quota.organizer.free_events_remaining > 0 ? (
+              <View style={[styles.quotaBanner, styles.quotaFree]} testID="quota-banner-free">
+                <View style={styles.quotaIcon}><Ionicons name="gift" size={18} color={colors.onLime} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.quotaTitleFree}>Your first {quota.organizer.free_event_limit} events are FREE</Text>
+                  <Text style={styles.quotaSubFree}>
+                    {quota.organizer.free_events_remaining} of {quota.organizer.free_event_limit} free
+                    event{quota.organizer.free_events_remaining === 1 ? "" : "s"} left
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={[styles.quotaBanner, styles.quotaPaid]} testID="quota-banner-paid">
+                <View style={[styles.quotaIcon, { backgroundColor: colors.brand }]}><Ionicons name="card" size={18} color={colors.onBrandPrimary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.quotaTitlePaid}>
+                    Publish fee: ₹{quota.organizer.platform_fee_inr}
+                  </Text>
+                  <Text style={styles.quotaSubPaid}>
+                    You&apos;ve used all {quota.organizer.free_event_limit} free events.
+                    You&apos;ll be prompted to pay before publishing.
+                  </Text>
+                </View>
+              </View>
+            )
+          )}
+
           <Label styles={styles}>Event Title</Label>
           <TextInput testID="title-input" style={styles.input} placeholder="Sunset Symphony" value={title} onChangeText={setTitle} placeholderTextColor={colors.muted} />
 
@@ -252,7 +424,7 @@ export default function EventForm({ editId }: Props) {
               style={[styles.uploadCard, isCustomBanner && styles.imgOptionActive]}
               testID="upload-banner-btn"
             >
-              <Ionicons name="cloud-upload-outline" size={20} color={colors.brand} />
+              <Ionicons name="cloud-upload-outline" size={20} color={colors.accentText} />
               <Text style={styles.uploadText}>Upload</Text>
             </Pressable>
             {isCustomBanner && (
@@ -280,45 +452,45 @@ export default function EventForm({ editId }: Props) {
             ))}
           </ScrollView>
 
-          <Label styles={styles}>Date</Label>
-          <TextInput testID="date-input" style={styles.input} placeholder="YYYY-MM-DD" value={dateStr} onChangeText={setDateStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
+          <Label styles={styles}>Starts</Label>
+          <DateTimeField
+            label="Start date & time"
+            value={startAt}
+            onChange={(d) => {
+              setStartAt(d);
+              // Auto-bump end if user picks a start that's after current end.
+              if (!endAt || endAt.getTime() <= d.getTime()) {
+                const nextEnd = new Date(d);
+                nextEnd.setDate(nextEnd.getDate() + 1);
+                setEndAt(nextEnd);
+              }
+            }}
+            testID="start-date-field"
+          />
 
-          <Label styles={styles}>Time (24h)</Label>
-          <TextInput testID="time-input" style={styles.input} placeholder="19:30" value={timeStr} onChangeText={setTimeStr} placeholderTextColor={colors.muted} autoCapitalize="none" />
+          <Label styles={styles}>Ends</Label>
+          <DateTimeField
+            label="End date & time"
+            value={endAt}
+            onChange={setEndAt}
+            minDate={startAt || undefined}
+            testID="end-date-field"
+          />
 
           <Label styles={styles}>Location</Label>
-          <Pressable
-            style={styles.locPicker}
-            onPress={() => setPickerOpen(true)}
-            testID="open-location-picker"
-          >
-            <View style={styles.locIcon}>
-              <Ionicons name="map" size={18} color={colors.brand} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.locPickerTitle} numberOfLines={1}>
-                {locationName || "Pick location on map"}
-              </Text>
-              <Text style={styles.locPickerSub}>
-                {latitude && longitude
-                  ? `${parseFloat(latitude).toFixed(4)}, ${parseFloat(longitude).toFixed(4)}`
-                  : "Tap to search or drop a pin"}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.borderStrong} />
-          </Pressable>
-          <Pressable onPress={useMyGPS} style={styles.gpsBtn} testID="use-my-gps-btn">
-            <Ionicons name="navigate" size={16} color={colors.brand} />
-            <Text style={styles.gpsText}>Or use my current location</Text>
-          </Pressable>
-
-          <TextInput
-            testID="location-input"
-            style={[styles.input, { marginTop: spacing.sm }]}
-            placeholder="Location name (e.g. Golden Gate Park)"
-            value={locationName}
-            onChangeText={setLocationName}
-            placeholderTextColor={colors.muted}
+          <LocationSearchField
+            testID="location-search"
+            value={{
+              name: locationName,
+              latitude: parseFloat(latitude) || null,
+              longitude: parseFloat(longitude) || null,
+            }}
+            onChange={(picked) => {
+              setLocationName(picked.name);
+              setLatitude(String(picked.latitude));
+              setLongitude(String(picked.longitude));
+            }}
+            autoUseCurrent={!editId}
           />
 
           {!isNaN(parseFloat(latitude)) && !isNaN(parseFloat(longitude)) && (
@@ -329,6 +501,18 @@ export default function EventForm({ editId }: Props) {
                 label={locationName || "Event location"}
                 height={160}
               />
+              {/* "Adjust pin on map" — opens a full interactive map so the
+                  organizer can fine-tune the exact position after picking
+                  a place from search. */}
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                style={styles.pinAdjustBtn}
+                testID="adjust-pin-btn"
+              >
+                <Ionicons name="pin" size={16} color={colors.accentText} />
+                <Text style={styles.pinAdjustText}>Adjust pin on map</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.borderStrong} />
+              </Pressable>
             </View>
           )}
 
@@ -352,16 +536,55 @@ export default function EventForm({ editId }: Props) {
           </View>
 
           {bookingType === "seat_map" && (
-            <View style={styles.row2}>
-              <View style={{ flex: 1 }}>
-                <Label styles={styles}>Rows</Label>
-                <TextInput testID="rows-input" style={styles.input} value={seatRows} onChangeText={setSeatRows} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+            <>
+              <View style={styles.row2}>
+                <View style={{ flex: 1 }}>
+                  <Label styles={styles}>Rows</Label>
+                  <TextInput testID="rows-input" style={styles.input} value={seatRows} onChangeText={setSeatRows} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Label styles={styles}>Columns</Label>
+                  <TextInput testID="cols-input" style={styles.input} value={seatCols} onChangeText={setSeatCols} keyboardType="number-pad" placeholderTextColor={colors.muted} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Label styles={styles}>Columns</Label>
-                <TextInput testID="cols-input" style={styles.input} value={seatCols} onChangeText={setSeatCols} keyboardType="number-pad" placeholderTextColor={colors.muted} />
-              </View>
-            </View>
+
+              <Label styles={styles}>Time Slots (optional)</Label>
+              <Text style={styles.slotHelper}>
+                Leave empty for a single-show event, or add multiple showings.
+                Each showing uses the same seat map above.
+              </Text>
+              {timeSlots.map((s, i) => (
+                <View key={i} style={styles.slotRow}>
+                  <TextInput
+                    testID={`seatmap-slot-input-${i}`}
+                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder="e.g. Matinee · 2:00 PM"
+                    value={s.time}
+                    onChangeText={(v) => {
+                      const next = [...timeSlots]; next[i] = { ...next[i], time: v }; setTimeSlots(next);
+                    }}
+                    placeholderTextColor={colors.muted}
+                  />
+                  {timeSlots.length > 1 && (
+                    <Pressable
+                      testID={`seatmap-slot-remove-${i}`}
+                      style={styles.slotRemove}
+                      onPress={() => setTimeSlots(timeSlots.filter((_, idx) => idx !== i))}
+                    >
+                      <Ionicons name="close" size={16} color={colors.error} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+              <Pressable
+                style={styles.addSlot}
+                onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
+                testID="seatmap-add-slot-btn"
+              >
+                <Ionicons name="add" size={16} color={colors.accentText} />
+                <Text style={styles.addSlotText}>Add another showing</Text>
+              </Pressable>
+            </>
           )}
 
           {bookingType === "general" && (
@@ -374,20 +597,39 @@ export default function EventForm({ editId }: Props) {
           {bookingType === "time_slot" && (
             <>
               <Label styles={styles}>Time Slots</Label>
+              <Text style={styles.slotHelper}>
+                Add each slot and how many seats it can hold.
+              </Text>
               {timeSlots.map((s, i) => (
-                <View key={i} style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm }}>
+                <View key={i} style={styles.slotRow}>
                   <TextInput
                     testID={`slot-input-${i}`}
-                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    style={[styles.input, styles.slotTimeInput]}
                     placeholder="e.g. 2:00 PM Session"
-                    value={s}
+                    value={s.time}
                     onChangeText={(v) => {
-                      const next = [...timeSlots]; next[i] = v; setTimeSlots(next);
+                      const next = [...timeSlots]; next[i] = { ...next[i], time: v }; setTimeSlots(next);
                     }}
                     placeholderTextColor={colors.muted}
                   />
+                  <View style={styles.slotCapWrap}>
+                    <TextInput
+                      testID={`slot-capacity-${i}`}
+                      style={[styles.input, styles.slotCapInput]}
+                      placeholder="Seats"
+                      keyboardType="number-pad"
+                      value={String(s.capacity)}
+                      onChangeText={(v) => {
+                        const n = parseInt(v.replace(/[^0-9]/g, "")) || 0;
+                        const next = [...timeSlots]; next[i] = { ...next[i], capacity: n }; setTimeSlots(next);
+                      }}
+                      placeholderTextColor={colors.muted}
+                    />
+                    <Text style={styles.slotCapUnit}>seats</Text>
+                  </View>
                   {timeSlots.length > 1 && (
                     <Pressable
+                      testID={`slot-remove-${i}`}
                       style={styles.slotRemove}
                       onPress={() => setTimeSlots(timeSlots.filter((_, idx) => idx !== i))}
                     >
@@ -396,8 +638,12 @@ export default function EventForm({ editId }: Props) {
                   )}
                 </View>
               ))}
-              <Pressable style={styles.addSlot} onPress={() => setTimeSlots([...timeSlots, ""])} testID="add-slot-btn">
-                <Ionicons name="add" size={16} color={colors.brand} />
+              <Pressable
+                style={styles.addSlot}
+                onPress={() => setTimeSlots([...timeSlots, { time: "", capacity: 50 }])}
+                testID="add-slot-btn"
+              >
+                <Ionicons name="add" size={16} color={colors.accentText} />
                 <Text style={styles.addSlotText}>Add another slot</Text>
               </Pressable>
             </>
@@ -415,7 +661,13 @@ export default function EventForm({ editId }: Props) {
           >
             {loading ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
               <>
-                <Text style={styles.submitText}>{isEdit ? "Save Changes" : "Publish Event"}</Text>
+                <Text style={styles.submitText}>
+                  {isEdit
+                    ? "Save Changes"
+                    : quota?.organizer && quota.organizer.free_events_remaining <= 0
+                    ? `Publish for ₹${quota.organizer.platform_fee_inr}`
+                    : "Publish Event"}
+                </Text>
                 <Ionicons name="rocket" size={18} color={colors.onBrandPrimary} />
               </>
             )}
@@ -425,19 +677,34 @@ export default function EventForm({ editId }: Props) {
 
       <LocationPicker
         visible={pickerOpen}
-        initialLat={parseFloat(latitude) || 37.7749}
-        initialLng={parseFloat(longitude) || -122.4194}
+        initialLat={parseFloat(latitude) || 19.076}
+        initialLng={parseFloat(longitude) || 72.877}
         initialLabel={locationName}
         onCancel={() => setPickerOpen(false)}
         onSelect={(loc) => {
           setLatitude(String(loc.latitude));
           setLongitude(String(loc.longitude));
-          // Only auto-fill location name if the field is empty — never clobber
-          // a name the organizer typed themselves.
           if (!locationName || locationName.length === 0) {
             setLocationName(loc.label);
           }
           setPickerOpen(false);
+        }}
+      />
+
+      <RazorpayCheckout
+        visible={rzpVisible}
+        order={rzpOrder}
+        onSuccess={onPlatformFeeVerified}
+        onCancel={() => {
+          setRzpVisible(false);
+          setRzpOrder(null);
+          pendingBodyRef.current = null;
+          setError("Publish payment cancelled. Try again when you're ready.");
+        }}
+        onError={(msg) => {
+          setRzpVisible(false);
+          setRzpOrder(null);
+          setError(msg || "Payment failed");
         }}
       />
     </SafeAreaView>
@@ -452,111 +719,157 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderBottomColor: colors.divider, borderBottomWidth: 1,
+    paddingHorizontal: 20, paddingVertical: spacing.md,
   },
   iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 44, height: 44, borderRadius: 14,
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center", justifyContent: "center",
   },
-  title: { flex: 1, fontSize: 22, fontWeight: "700", color: colors.onSurface },
+  title: { flex: 1, fontFamily: fonts.display, fontSize: 22, fontWeight: "800", color: colors.onSurface },
   deleteBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#FEF2F2",
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: colors.error + "1F",
+    borderWidth: 1, borderColor: colors.error + "55",
     alignItems: "center", justifyContent: "center",
   },
   label: {
-    fontSize: 13, color: colors.onSurfaceTertiary, marginBottom: spacing.xs,
-    marginTop: spacing.md, fontWeight: "500",
+    fontSize: 12, color: colors.muted, marginBottom: 6,
+    marginTop: spacing.lg, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6,
   },
   input: {
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 14,
-    fontSize: 15, color: colors.onSurface,
+    borderRadius: 16, paddingHorizontal: spacing.lg, minHeight: 52, paddingVertical: 14,
+    fontSize: 15, color: colors.onSurface, fontWeight: "600",
     borderColor: colors.border, borderWidth: 1,
     marginBottom: spacing.xs,
   },
   chipsRow: { gap: spacing.sm, paddingVertical: spacing.xs },
   chip: {
-    paddingHorizontal: spacing.lg, height: 36, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: spacing.lg, height: 38, alignItems: "center", justifyContent: "center",
     borderRadius: radius.pill, borderColor: colors.border, borderWidth: 1,
     backgroundColor: colors.surfaceSecondary,
   },
-  chipActive: { backgroundColor: colors.onSurface, borderColor: colors.onSurface },
-  chipText: { fontSize: 13, color: colors.onSurfaceTertiary, fontWeight: "500" },
-  chipTextActive: { color: colors.surface, fontWeight: "600" },
-  imgOption: { padding: 2, borderRadius: 8, borderWidth: 2, borderColor: "transparent" },
+  chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  chipText: { fontSize: 13, color: colors.onSurface, fontWeight: "700" },
+  chipTextActive: { color: colors.onBrandPrimary, fontWeight: "800" },
+  imgOption: { padding: 2, borderRadius: 14, borderWidth: 2, borderColor: "transparent" },
   imgOptionActive: { borderColor: colors.brand },
   uploadCard: {
-    width: 94, height: 64, borderRadius: 10,
-    borderWidth: 2, borderColor: colors.borderStrong,
+    width: 94, height: 64, borderRadius: 14,
+    borderWidth: 1.5, borderColor: colors.brand,
     borderStyle: "dashed",
-    backgroundColor: colors.surfaceTertiary,
+    backgroundColor: colors.brand + "14",
     alignItems: "center", justifyContent: "center",
-    gap: 2,
+    gap: 2, marginTop: 2,
   },
-  uploadText: { fontSize: 11, color: colors.brand, fontWeight: "600" },
+  uploadText: { fontSize: 11, color: colors.accentText, fontWeight: "800" },
   row2: { flexDirection: "row", gap: spacing.md },
   gpsBtn: {
     flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
     paddingVertical: 8, marginTop: 2,
   },
-  gpsText: { color: colors.brand, fontSize: 13, fontWeight: "500" },
+  gpsText: { color: colors.accentText, fontSize: 13, fontWeight: "700" },
+  pinAdjustBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: spacing.md, minHeight: 48,
+    marginTop: spacing.sm,
+  },
+  pinAdjustText: { flex: 1, color: colors.onSurface, fontSize: 14, fontWeight: "700" },
+  quotaBanner: {
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    borderRadius: 18, padding: spacing.md,
+    marginBottom: spacing.sm, borderWidth: 1,
+  },
+  quotaIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.lime,
+    alignItems: "center", justifyContent: "center",
+  },
+  quotaFree: { backgroundColor: colors.lime + "1A", borderColor: colors.lime + "59" },
+  quotaPaid: { backgroundColor: colors.brand + "1A", borderColor: colors.brand + "66" },
+  quotaTitleFree: { color: colors.onSurface, fontSize: 14, fontWeight: "800" },
+  quotaSubFree: { color: colors.soft, fontSize: 12, marginTop: 2 },
+  quotaTitlePaid: { color: colors.onSurface, fontSize: 14, fontWeight: "800" },
+  quotaSubPaid: { color: colors.soft, fontSize: 12, marginTop: 2 },
+  statusBanner: {
+    flexDirection: "row", alignItems: "flex-start", gap: spacing.md,
+    borderRadius: 18, padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  statusBannerIcon: {
+    width: 36, height: 36, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+  },
+  statusBannerTitle: { fontSize: 14, fontWeight: "800", letterSpacing: 0.3 },
+  statusBannerSub: { fontSize: 12, marginTop: 2, opacity: 0.9 },
+  holdReasonsList: { marginTop: 8, gap: 4 },
+  holdReasonItem: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
+  holdReasonItemText: { flex: 1, fontSize: 12, lineHeight: 16, fontWeight: "600" },
   locPicker: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
     backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md,
+    borderRadius: 16,
     padding: spacing.md,
     borderColor: colors.border, borderWidth: 1,
   },
   locIcon: {
     width: 40, height: 40, borderRadius: 12,
-    backgroundColor: colors.brandTertiary,
+    backgroundColor: colors.brand + "29",
     alignItems: "center", justifyContent: "center",
   },
-  locPickerTitle: { fontSize: 15, color: colors.onSurface, fontWeight: "600" },
+  locPickerTitle: { fontSize: 15, color: colors.onSurface, fontWeight: "700" },
   locPickerSub: { fontSize: 12, color: colors.muted, marginTop: 2 },
   typeCol: { gap: spacing.sm },
   typeItem: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
-    padding: spacing.md, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, minHeight: 54, borderRadius: 16,
     borderColor: colors.border, borderWidth: 1,
     backgroundColor: colors.surfaceSecondary,
   },
-  typeItemActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
+  typeItemActive: { borderColor: colors.brand, borderWidth: 1.5, backgroundColor: colors.brand + "1A" },
   radio: {
     width: 22, height: 22, borderRadius: 11,
     borderWidth: 2, borderColor: colors.borderStrong,
     alignItems: "center", justifyContent: "center",
   },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brand },
-  typeText: { fontSize: 15, color: colors.onSurface, fontWeight: "500" },
+  typeText: { fontSize: 15, color: colors.onSurface, fontWeight: "700" },
   addSlot: {
     flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
-    padding: 8,
+    paddingVertical: 10, paddingHorizontal: 4,
   },
-  addSlotText: { color: colors.brand, fontWeight: "500" },
+  addSlotText: { color: colors.accentText, fontWeight: "800" },
+  slotHelper: { fontSize: 12, color: colors.muted, marginBottom: spacing.sm, marginTop: -2 },
+  slotRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  slotTimeInput: { flex: 1.4, marginBottom: 0 },
+  slotCapWrap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  slotCapInput: { flex: 1, marginBottom: 0, textAlign: "center", paddingHorizontal: 8 },
+  slotCapUnit: { fontSize: 12, color: colors.muted, fontWeight: "700" },
   slotRemove: {
-    width: 44, height: 44, borderRadius: radius.md,
+    width: 44, height: 44, borderRadius: 14,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "#FEF2F2",
+    backgroundColor: colors.error + "1F",
   },
   error: {
-    color: colors.error, marginTop: spacing.md,
-    backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,
+    color: colors.error, marginTop: spacing.md, fontWeight: "700",
+    backgroundColor: colors.error + "1A", padding: spacing.md, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.error + "55",
   },
   stickyBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surface,
     borderTopColor: colors.border, borderTopWidth: 1,
-    padding: spacing.lg, paddingBottom: 24,
-    ...shadows.floating,
+    padding: spacing.lg, paddingBottom: 20,
   },
   submitBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: colors.brandPrimary, borderRadius: radius.pill,
-    paddingVertical: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: colors.brandPrimary, borderRadius: 16,
+    height: 54,
+    ...shadows.glow,
   },
-  submitText: { color: colors.onBrandPrimary, fontWeight: "600", fontSize: 16 },
+  submitText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: 16 },
 });

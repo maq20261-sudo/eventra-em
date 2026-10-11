@@ -1,0 +1,39 @@
+{
+  "summary": "Verified the June 2026 additions end-to-end. BACKEND: 106/107 tests pass (94 pre-existing + 10 new in test_start_end_and_seatmap_slots.py + 3 new extras I added in test_start_end_extras.py covering PUT-bumps-stale-end-date, cancel-releases-seatmap+slot-inventory, and migration-002-idempotency). The single failure (test_booked_seats_endpoint_filters_by_slot) is the known /register 429 rate-limit when run in the full-suite; verified PASSING solo. Migration 002 is idempotent — second run reports 'Updated: 0'. FRONTEND: EventForm exposes start-date-field + end-date-field (no more free-text YYYY-MM-DD) and seat_map booking type shows the 'Time Slots (optional)' section with seatmap-add-slot-btn + seatmap-slot-input-{i}. Booking flow for seat_map+time_slots correctly forces the user to pick a slot FIRST (header sub 'Pick a showing'), then reveals the seat grid with a 'Showing: <slot>' pill. Switching slots refreshes per-slot availability (verified: A1 booked in Matinee 3PM shows aria-disabled=true, while the same A1 in Evening 8PM is available). Event detail and ticket screens render the eventDateRange helper (e.g. 'Sep 1, 08:00 AM – Sep 2, 08:00 AM'). No red-screen errors; only harmless RN-web deprecation console warnings for shadow*/textShadow*.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/register", "issue": "Rate-limit (5/minute) causes the last test in test_start_end_and_seatmap_slots.py to fail when the suite is executed back-to-back. Passes solo. Consider raising the limit in the test env or making the tests re-use one organizer/consumer token."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "book/[id].tsx footer total", "issue": "When 0 seats are selected for a paid seat_map event the footer shows 'Total: Free' rather than '₹0' or '—'. Non-blocking cosmetic — not a regression, but confusing on a ₹100/seat event.", "testID": "N/A", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iteration_12_full.xml",
+    "/app/backend/tests/test_start_end_and_seatmap_slots.py",
+    "/app/backend/tests/test_start_end_extras.py"
+  ],
+  "action_items": [
+    "Optional: fix the 'Total: Free' cosmetic — show '₹0' or 'Select seats' when nothing is picked on a paid seat_map event.",
+    "Optional: bump the /register rate-limit in TEST env or refactor test_start_end_and_seatmap_slots.py to reuse tokens so full-suite runs cleanly without needing solo re-runs. Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 2008 lines — flagged in iterations 10 & 11 and still not split. Recommend extracting bookings / events / auth into separate routers.",
+    "DateTimeField.tsx web fallback uses TextInput with `type` prop (see line 220-221 // @ts-expect-error). Works fine on rn-web today but is brittle if react-native-web ever tightens its prop types. Consider forwarding via `nativeID` or a small `Platform.OS === 'web'` div fallback."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_start_end_extras.py (NEW — 3 extras: PUT date bump, cancel-releases-slot-seats, migration idempotency)"
+  ],
+  "success_rate": {"backend": "99.1% (106/107; 1 failure is rate-limit only, passes solo)", "frontend": "100% (all requested flows: EventForm dates, seat_map slots section, book slot-first UX, slot pill, slot-switch refresh, event detail date range)"},
+  "seed_data_creation": "Created TEST_i12_SeatMapSlots event id=2655ee00-731e-40d3-af98-db1627520567 (4×5 seat_map with slots ['Matinee 3PM','Evening 8PM'], ₹100/seat). Booked seat A1 in Matinee 3PM as demo@consumer.com (booking id c9b8e21b-0a2c-4cc4-95cb-b7e82a3acddd) to prove per-slot availability. Left in DB so main agent / next reviewer can inspect the UI.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To retest the slot-switch UX: log in as demo@consumer.com, open /book/2655ee00-731e-40d3-af98-db1627520567. Matinee 3PM has A1 taken; Evening 8PM has A1 free. Extra pytest module: /app/backend/tests/test_start_end_extras.py — pace tests since /register is rate-limited (~5/min). Migration script is at /app/backend/migrations/002_start_end_date.py; re-running it must always report 'Updated: 0'.",
+  "rca_of_issue": "N/A — no bugs. Feature addition fully verified. Only one flaky failure in the pytest bulk-run due to the /register rate-limit, which is a known limitation of the test harness (not a product bug)."
+}

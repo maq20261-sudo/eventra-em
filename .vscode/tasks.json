@@ -1,0 +1,88 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: up",
+      "type": "shell",
+      "command": "docker compose up -d",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "Backend: logs",
+      "type": "shell",
+      "command": "docker compose logs -f --tail 200 backend",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "stack" }
+    },
+    {
+      "label": "Backend: stop",
+      "type": "shell",
+      "command": "docker compose stop",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: seed demo data",
+      "type": "shell",
+      "command": "docker compose exec backend python seed.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: tests (Docker)",
+      "type": "shell",
+      "command": "docker compose --profile test run --rm tests",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Backend: start test server (for Testing panel)",
+      "type": "shell",
+      "command": "docker compose --profile test up -d backend-test; docker compose exec -e DB_NAME=gatherspace_test backend python seed.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Metro",
+      "type": "shell",
+      "command": "npx.cmd expo start --dev-client",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "stack" }
+    },
+    {
+      "label": "Frontend: Metro (web)",
+      "type": "shell",
+      "command": "npx.cmd expo start --web",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated" }
+    },
+    {
+      "label": "Frontend: typecheck",
+      "type": "shell",
+      "command": "npx.cmd tsc --noEmit -p .",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": { "base": "$tsc", "fileLocation": ["relative", "${workspaceFolder}/frontend"] }
+    },
+    {
+      "label": "Frontend: lint",
+      "type": "shell",
+      "command": "npx.cmd expo lint",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": { "base": "$eslint-stylish", "fileLocation": "absolute" }
+    },
+    {
+      "label": "Start stack",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Backend: up", "Start stack: logs + Metro"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Start stack: logs + Metro",
+      "dependsOn": ["Backend: logs", "Frontend: Metro"],
+      "problemMatcher": []
+    }
+  ]
+}
