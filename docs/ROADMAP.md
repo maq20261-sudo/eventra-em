@@ -3,7 +3,7 @@
 What's done, what's next, and what is waiting on the owner. Every phase
 needs the owner's explicit go-ahead before implementation (see `CLAUDE.md`).
 
-_Last updated: 2026-10-10_
+_Last updated: 2026-10-11_
 
 ## Status at a glance
 
@@ -11,7 +11,7 @@ _Last updated: 2026-10-10_
 |---|---|
 | Part A — local development (Docker, VS Code, dev build, accounts) | ✅ Done (`7bdc823`) |
 | UI/UX redesign "Neon Night" + excitement features + brand assets | ✅ Done (`a064b6f`), tested by the owner on Android dev build |
-| Part B — AWS production | 🔨 In progress — **B1 code done** (branch `feat/aws-production`); B2 accounts next, runbook `docs/DEPLOYMENT.md` |
+| Part B — AWS production | 🔨 In progress — B1 code done; **B2 infrastructure built 2026-10-11** (AWS, S3, Lightsail, Atlas, DNS, server secrets, GitHub); next: PR into `main` = first deploy. Razorpay on **test keys** (KYC rejected). See `docs/DEPLOYMENT.md` → Current production setup |
 | Part C — bug fixes | ⏳ After B (some may be pulled earlier) |
 | Store release of the new app | ⏳ After B |
 
@@ -24,9 +24,11 @@ _Last updated: 2026-10-10_
 
 ## Open actions for the owner
 - [ ] Enable **Geocoding API** on the Google Cloud key (server fallback for area names).
-- [ ] PR into `main` (when B1 is approved), then follow `docs/DEPLOYMENT.md` steps 1–8.
+- [x] `docs/DEPLOYMENT.md` steps 1–5, 7, 8 done 2026-10-11 (step 6 Razorpay live postponed).
+- [ ] Merge the PR into `main` → first deploy (step 9), then preview APK test.
+- [ ] Atlas: remove the temporary PC IP from Network Access when no longer needed.
 - [x] Push `feat/neon-redesign` to GitHub (done 2026-10-10).
-- [ ] Razorpay KYC / live activation (needed for live keys + webhook).
+- [ ] **Razorpay live activation** — rejected 2026-10-11: "Individual" business type isn't supported for event ticketing. Ask Razorpay support whether a sole proprietorship (Udyam + current account, GST if needed) is accepted, else LLP/Pvt Ltd; then reapply. Until then production runs Razorpay **test** keys — decide before the store switch-over whether to wait or temporarily disable paid online flows.
 - [ ] New EAS **development build** to see the new icon/splash (`npx eas-cli build --profile development --platform android`).
 - [ ] iOS: `npx eas-cli device:create` on the iPhone, then an iOS dev build.
 - [ ] Play Console → App integrity: confirm Play App Signing, then **request upload-key reset** with the EAS upload certificate (takes Google a few days — start early).

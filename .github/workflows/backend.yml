@@ -108,7 +108,7 @@ jobs:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          source: "deploy/docker-compose.prod.yml,deploy/Caddyfile,deploy/backup.sh"
+          source: "deploy/docker-compose.prod.yml,deploy/Caddyfile,deploy/backup.sh,deploy/set-secret.sh"
           target: /opt/gatherspace
           strip_components: 1
       - name: Pull and restart
@@ -121,7 +121,7 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/gatherspace
-            chmod +x backup.sh
+            chmod +x backup.sh set-secret.sh
             printf 'IMAGE_TAG=%s\nAPI_DOMAIN=%s\n' "$IMAGE_TAG" "$API_DOMAIN" > .env
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose -f docker-compose.prod.yml pull

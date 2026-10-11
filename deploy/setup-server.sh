@@ -55,7 +55,7 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 echo "== Nightly backup at 02:30 IST (21:00 UTC)"
 CRON_LINE="0 21 * * * $APP_DIR/backup.sh >> $APP_DIR/backup.log 2>&1"
-( crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'backup.sh' ; echo "$CRON_LINE" ) | crontab -u "$APP_USER" -
+{ crontab -u "$APP_USER" -l 2>/dev/null | grep -v 'backup.sh' || true; echo "$CRON_LINE"; } | crontab -u "$APP_USER" -
 
 echo
 echo "Done. Next (as $APP_USER, see docs/DEPLOYMENT.md):"

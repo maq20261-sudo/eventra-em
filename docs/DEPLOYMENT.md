@@ -17,6 +17,24 @@ Cost ≈ $8/month. Files live in `deploy/` and `.github/workflows/backend.yml`.
 Secrets never go into git or the Docker image. On the server they live in
 `/opt/gatherspace/backend.env` and `/opt/gatherspace/firebase-admin.json`.
 
+## Current production setup (built 2026-10-11)
+| Piece | Value |
+|---|---|
+| AWS account | A **standard** account (root MFA on). Not the "new AWS experience": those projects are locked to their creation region by an AWS-managed SCP (ours was Sydney), so Mumbai was impossible. |
+| Local AWS CLI profile | `gs-prod` (`aws login --profile gs-prod --region ap-south-1`; session lasts 12 h, renews up to 90 days) |
+| Budget | `gatherspace-monthly`, $15, emails to the owner at 80 % / 100 % actual and 100 % forecast |
+| S3 | `gatherspace-prod-media` (ap-south-1), IAM user `gatherspace-server` (inline policy `gatherspace-s3`, one access key in `backend.env`) |
+| Server | Lightsail `gatherspace-api`, `micro_3_1` ($7), ap-south-1a, Ubuntu 24.04, static IP `gatherspace-api-ip` = **65.2.231.136**, ports 22/80/443 |
+| SSH | Admin key `~/.ssh/gs_admin` on the owner's PC (Lightsail key pair `gs-admin`): `ssh -i ~/.ssh/gs_admin ubuntu@65.2.231.136`. GitHub deploy key: only in the `LIGHTSAIL_SSH_KEY` secret. |
+| Atlas | Project GatherSpace, cluster `cluster0` (M0, AWS Mumbai), Atlas default user, DB name `gatherspace`; IP access: 65.2.231.136 (+ the owner's PC, temporary) |
+| DNS | GoDaddy: `A api → 65.2.231.136` |
+| Razorpay | **Test keys** in production until live activation — KYC was rejected (Individual business type not supported for event ticketing; next: reapply as sole proprietorship / company). Webhook not configured yet (`/payments/webhook` returns 503 until `RAZORPAY_WEBHOOK_SECRET` is set). |
+| GitHub | Environment `production` (no approval), secrets `LIGHTSAIL_HOST/USER/SSH_KEY`, variables `API_DOMAIN`, `DEPLOY_ENABLED=true` |
+
+**Change a secret on the server** (value never shown): `/opt/gatherspace/set-secret.sh KEY`, then `docker compose -f docker-compose.prod.yml up -d backend`.
+
+**When Razorpay goes live:** `set-secret.sh RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` → restart backend → add the live webhook (step 6) → test one real ₹1–₹10 payment + refund.
+
 ---
 
 ## 1. AWS account + billing safety (owner, ~10 min)
@@ -89,7 +107,12 @@ Check: `nslookup api.gatherspace.in` returns the static IP. Caddy obtains the HT
 4. Settings → Payment capture → **Automatic** (the server also requests auto-capture per order).
 
 ## 7. Server secrets (owner + Claude, ~10 min)
-On the server, as `ubuntu`:
+What was actually done: Claude generated `backend.env` on the PC (new JWT secret,
+Razorpay test + Google keys from the local `.env`, a freshly created S3 access
+key) and streamed it over SSH without printing; copied `firebase-admin.json`;
+the owner set `MONGO_URL` with `/opt/gatherspace/set-secret.sh MONGO_URL`.
+
+Manual alternative, on the server as `ubuntu`:
 ```bash
 cd /opt/gatherspace
 nano backend.env              # fill from deploy/backend.env.example
