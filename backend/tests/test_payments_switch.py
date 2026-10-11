@@ -88,6 +88,10 @@ def test_fees_when_off(payments_off, monkeypatch):
     async def many(_user_id):
         return 50
 
+    # CI raises the organizer limit (ORGANIZER_FREE_EVENT_LIMIT=1000); pin both
+    # so 50 is always past the free tier here.
+    monkeypatch.setenv("ORGANIZER_FREE_EVENT_LIMIT", "5")
+    monkeypatch.setenv("ATTENDEE_FREE_BOOKING_LIMIT", "5")
     monkeypatch.setattr(server, "_organizer_event_count", many)
     monkeypatch.setattr(server, "_attendee_paid_booking_count", many)
 
