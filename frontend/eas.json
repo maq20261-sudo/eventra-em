@@ -19,6 +19,11 @@
       "autoIncrement": true,
       "channel": "production",
       "env": { "EXPO_PUBLIC_BACKEND_URL": "https://api.gatherspace.in" }
+    },
+    "production-apk": {
+      "extends": "production",
+      "distribution": "internal",
+      "android": { "buildType": "apk" }
     }
   },
   "submit": {
