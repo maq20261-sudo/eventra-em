@@ -36,6 +36,12 @@ cd frontend; npx tsc --noEmit -p .                   # typecheck (must be clean)
 Demo logins (local): `demo@organizer.com` / `demo@consumer.com`, password `password123`.
 Expected test baseline: all pass except `test_only_past_returns_only_ended_events` (needs Emergent's old data). Tests needing Razorpay/Google keys skip when keys are absent (as in GitHub CI).
 
+## Secrets — the repo is PUBLIC
+- Never commit credentials or sensitive data: keys, passwords, connection strings with passwords, private keys, `.env` files, `firebase-admin.json`, SSH keys, AWS account IDs, personal emails/phone numbers. Anything pushed is public forever (even after deletion → must rotate).
+- Real values live only in git-ignored local files, the server's `backend.env` (`set-secret.sh`), and GitHub Actions secrets. Docs use placeholders like `<password>`.
+- Guards: `.githooks/pre-commit` (enable per clone: `git config core.hooksPath .githooks`), CI workflow `secrets` (gitleaks, `.gitleaks.toml`), GitHub secret scanning + push protection (on). Never bypass with `--no-verify`; fix the false positive in the patterns instead.
+- Firebase client configs (`google-services.json`, `GoogleService-Info.plist`) are committed by design — their API keys must stay restricted in Google Cloud Console.
+
 ## Production rules
 - Production = `APP_ENV=production` on the Lightsail server; never run `seed.py` or tests against the Atlas database.
 - Never hardcode secrets; production secrets live only in `/opt/gatherspace/backend.env` + `firebase-admin.json` on the server and in GitHub Actions secrets.

@@ -1,0 +1,29 @@
+# Secret scanning rules (used by .githooks/pre-commit and the "secrets" CI workflow).
+# Default gitleaks rules plus GatherSpace-specific ones.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "razorpay-key"
+description = "Razorpay API key id (live or test)"
+regex = '''rzp_(live|test)_[A-Za-z0-9]{10,}'''
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''rzp_test_placeholder''']
+
+[[rules]]
+id = "mongodb-uri-with-password"
+description = "MongoDB connection string with credentials"
+regex = '''mongodb(\+srv)?://[^:\s/@]+:[^@\s<>]+@'''
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''://[^:\s/@]+:(PASSWORD|REALPASSWORD|password)@''']
+
+[allowlist]
+description = "Firebase client configs ship inside the app by design (not server secrets)"
+paths = [
+  '''frontend/google-services\.json''',
+  '''frontend/credentials/google-services\.json''',
+  '''frontend/GoogleService-Info\.plist''',
+]
