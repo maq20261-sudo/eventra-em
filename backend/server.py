@@ -56,6 +56,22 @@ rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 # endpoint is disabled until this is set.
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "").strip()
 
+
+def _payments_enabled() -> bool:
+    """Online payments switch (`PAYMENTS_ENABLED`, default on).
+
+    Off = "coming soon" mode while the Razorpay account isn't live: no new
+    checkout orders (bookings are pay-at-venue), the organizer publish fee is
+    waived, and only the boost tiers in FREE_BOOST_TIERS can be used, free.
+    The app reads this from the server, so turning it back on needs no
+    release. Payments already in flight still verify/refund normally.
+    """
+    return os.environ.get("PAYMENTS_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+
+
+# Boost tiers organizers may use for free while payments are off.
+FREE_BOOST_TIERS = ("24h",)
+
 # Legacy signup/OTP endpoints (plain /auth/register and the MSG91 flow) skip
 # Firebase phone verification. The app no longer uses them; keep them for
 # local tests only. Off by default in production.
@@ -2032,10 +2048,42 @@ async def _apply_boost(event_id: str, user: dict, tier: str, payment: Optional[D
 
 @api_router.post("/events/{event_id}/feature")
 async def feature_event(event_id: str, body: BoostRequest, user=Depends(require_role("organizer"))):
-    """SEC-001 fix: This endpoint no longer grants free boosts.
-    Organizers must go through the paid `/payments/create_order` +
-    `/payments/verify` flow. Kept for API back-compat.
+    """Free boost while online payments are off (FREE_BOOST_TIERS only, one
+    active boost per event — it can be renewed once it expires).
+
+    With payments on, boosts go through the paid `/payments/order` +
+    `/payments/verify` flow (SEC-001: this endpoint never grants free boosts
+    then).
     """
+    if not _payments_enabled() and body.tier in FREE_BOOST_TIERS:
+        e = await db.events.find_one({"id": event_id}, {"_id": 0})
+        if not e:
+            raise HTTPException(status_code=404, detail="Event not found")
+        if e["organizer_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="Not your event")
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        new_until = (now + timedelta(hours=FEATURE_TIERS[body.tier]["hours"])).isoformat()
+        # Atomic: only applies when the event isn't currently boosted, so
+        # double taps can't stack free boosts.
+        res = await db.events.update_one(
+            {"id": event_id, "$or": [
+                {"featured_until": {"$exists": False}},
+                {"featured_until": None},
+                {"featured_until": {"$lte": now_iso}},
+            ]},
+            {"$set": {"featured_until": new_until, "last_boost_payment": {
+                "provider": "none", "reason": "free_launch", "tier": body.tier, "at": now_iso}}},
+        )
+        if res.modified_count == 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This event is already boosted. You can boost it again once the current boost ends.",
+            )
+        return {"ok": True, "featured_until": new_until, "tier": body.tier,
+                "amount_charged": 0, "free": True}
+    if not _payments_enabled():
+        raise HTTPException(status_code=403, detail="This boost is coming soon.")
     raise HTTPException(
         status_code=402,
         detail="Payment required. Use /api/payments/create_order with kind='boost' to boost an event.",
@@ -2194,6 +2242,10 @@ async def _resolve_organizer_fee(user_id: str) -> Dict[str, Any]:
     if remaining > 0:
         return {"fee_paise": 0, "waived": True, "reason": "free_tier",
                 "used": used, "remaining": remaining}
+    if not _payments_enabled():
+        # Can't collect the fee online yet — publishing stays free for now.
+        return {"fee_paise": 0, "waived": True, "reason": "payments_disabled",
+                "used": used, "remaining": 0}
     return {"fee_paise": PLATFORM_FEE_ORGANIZER_PAISE, "waived": False, "reason": "standard",
             "used": used, "remaining": 0}
 
@@ -2202,15 +2254,21 @@ async def _resolve_organizer_fee(user_id: str) -> Dict[str, Any]:
 async def pricing_config():
     """Public snapshot of platform-fee amounts + free-tier limits so the
     client can render "N of 5 free left" hints even before hitting checkout."""
+    enabled = _payments_enabled()
     return {
+        "payments_enabled": enabled,
         "attendee_platform_fee_inr": PLATFORM_FEE_ATTENDEE_PAISE / 100.0,
         "organizer_platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
         "attendee_free_booking_limit": ATTENDEE_FREE_BOOKING_LIMIT,
         "organizer_free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
         # Boost prices are the single source of truth for the app's Boost
         # sheet — never hardcode them client-side (they drifted once).
+        # While payments are off only FREE_BOOST_TIERS are usable (free);
+        # the rest show as "coming soon".
         "boost_tiers": [
-            {"key": k, "price_inr": v["price"], "hours": v["hours"], "label": v["label"]}
+            {"key": k, "price_inr": v["price"], "hours": v["hours"], "label": v["label"],
+             "available": enabled or k in FREE_BOOST_TIERS,
+             "free": (not enabled) and k in FREE_BOOST_TIERS}
             for k, v in FEATURE_TIERS.items()
         ],
     }
@@ -2220,7 +2278,7 @@ async def pricing_config():
 async def my_quota(user=Depends(get_current_user)):
     """Returns the current user's usage against the two free tiers so the
     UI can show 'You have N free events left' / 'N free bookings left'."""
-    out: Dict[str, Any] = {}
+    out: Dict[str, Any] = {"payments_enabled": _payments_enabled()}
     if user.get("role") == "organizer":
         used = await _organizer_event_count(user["id"])
         out["organizer"] = {
@@ -2228,6 +2286,8 @@ async def my_quota(user=Depends(get_current_user)):
             "free_events_remaining": max(0, ORGANIZER_FREE_EVENT_LIMIT - used),
             "free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
             "platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
+            # True = no publish fee right now even past the free tier.
+            "fee_waived": not _payments_enabled(),
         }
     else:
         used = await _attendee_paid_booking_count(user["id"])
@@ -2258,7 +2318,8 @@ class PaymentVerify(BaseModel):
     razorpay_signature: str
 
 def _rzp_available() -> bool:
-    return _RZP_CONFIGURED
+    """New checkout orders possible: keys present and payments switched on."""
+    return _RZP_CONFIGURED and _payments_enabled()
 
 def _compute_booking_amount(event: dict, seats: Optional[List[str]], num_seats: Optional[int], time_slot: Optional[str]) -> float:
     bt = event["booking_type"]
@@ -2285,12 +2346,19 @@ async def payment_config():
         "provider": "razorpay",
         "key_id": RAZORPAY_KEY_ID if _rzp_available() else "",
         "configured": _rzp_available(),
+        # False = online payments "coming soon" (see _payments_enabled).
+        "enabled": _payments_enabled(),
         "currency": "INR",
         "usd_to_inr": 83,
     }
 
 @api_router.post("/payments/order")
 async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_current_user)):
+    if not _payments_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Online payments are coming soon. Please choose pay at venue for now.",
+        )
     if not _rzp_available():
         raise HTTPException(
             status_code=503,

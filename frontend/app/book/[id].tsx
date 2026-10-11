@@ -48,6 +48,8 @@ export default function Booking() {
   const [rzpVisible, setRzpVisible] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"online" | "venue">("online");
   const [gatewayConfigured, setGatewayConfigured] = useState(true);
+  // Server switch: online payments "coming soon" (pay at venue only).
+  const [paymentsSoon, setPaymentsSoon] = useState(false);
 
   useEffect(() => {
     // Reset event & booked state when the id changes so we don't
@@ -75,6 +77,7 @@ export default function Booking() {
           if (cancelled) return;
           const configured = !!cfg?.configured;
           setGatewayConfigured(configured);
+          setPaymentsSoon(cfg?.enabled === false);
           if (!configured) setPaymentMethod("venue");
         } catch {
           if (!cancelled) {
@@ -199,7 +202,7 @@ export default function Booking() {
           return;
         } catch (payErr: any) {
           const msg = payErr?.message || "";
-          if (msg.includes("not configured") || msg.includes("503")) {
+          if (msg.includes("not configured") || msg.includes("coming soon") || msg.includes("503")) {
             // Gateway went down mid-session — fall back gracefully
             setGatewayConfigured(false);
             setPaymentMethod("venue");
@@ -407,9 +410,10 @@ export default function Booking() {
                 testID="pay-method-online"
                 active={paymentMethod === "online"}
                 disabled={!gatewayConfigured}
+                badge={paymentsSoon ? "COMING SOON" : undefined}
                 icon="card"
                 title="Pay online"
-                subtitle={gatewayConfigured ? "UPI · cards · netbanking" : "Gateway unavailable"}
+                subtitle={gatewayConfigured || paymentsSoon ? "UPI · cards · netbanking" : "Gateway unavailable"}
                 onPress={() => { Haptics.selectionAsync(); setPaymentMethod("online"); }}
                 styles={styles}
                 colors={colors}
@@ -562,9 +566,10 @@ function Stepper({ value, onDec, onInc, decID, incID, valueID, styles, colors }:
   );
 }
 
-function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, testID, styles, colors }: {
+function PayMethodOption({ active, disabled, badge, icon, title, subtitle, onPress, testID, styles, colors }: {
   active: boolean;
   disabled?: boolean;
+  badge?: string;
   icon: any;
   title: string;
   subtitle: string;
@@ -588,6 +593,7 @@ function PayMethodOption({ active, disabled, icon, title, subtitle, onPress, tes
       </View>
       <Text style={[styles.payOptTitle, disabled && { color: colors.muted }]}>{title}</Text>
       <Text style={styles.payOptSub}>{subtitle}</Text>
+      {badge && <Tag label={badge} tone="pink" icon="time-outline" style={{ alignSelf: "flex-start", marginTop: 4 }} />}
     </PressableScale>
   );
 }

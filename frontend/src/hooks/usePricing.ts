@@ -3,6 +3,8 @@ import { useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 
 export type PricingConfig = {
+  /** false = online payments "coming soon" (server switch PAYMENTS_ENABLED). */
+  payments_enabled?: boolean;
   attendee_platform_fee_inr: number;
   organizer_platform_fee_inr: number;
   attendee_free_booking_limit: number;
@@ -10,9 +12,16 @@ export type PricingConfig = {
   boost_tiers?: BoostTier[];
 };
 
-export type BoostTier = { key: "24h" | "7d" | "30d"; price_inr: number; hours: number; label: string };
+export type BoostTier = {
+  key: "24h" | "7d" | "30d"; price_inr: number; hours: number; label: string;
+  /** Usable right now (while payments are off only the free tier is). */
+  available?: boolean;
+  /** Free while payments are off ("FREE for launch"). */
+  free?: boolean;
+};
 
 export type Quota = {
+  payments_enabled?: boolean;
   attendee?: {
     paid_bookings_used: number;
     free_bookings_remaining: number;
@@ -24,6 +33,8 @@ export type Quota = {
     free_events_remaining: number;
     free_event_limit: number;
     platform_fee_inr: number;
+    /** No publish fee right now, even past the free tier. */
+    fee_waived?: boolean;
   };
 };
 

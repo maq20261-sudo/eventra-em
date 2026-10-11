@@ -30,6 +30,7 @@ Store listings: Android `com.maq.gatherspace` (Play) and iOS bundle `com.maq.gat
 | Organizer publish fee | ₹19 per event after the free tier | `PLATFORM_FEE_ORGANIZER_PAISE` |
 | Organizer free tier | first 5 events free | `ORGANIZER_FREE_EVENT_LIMIT` |
 | Boost (Featured) | 1 day ₹9 · 7 days ₹49 · 30 days ₹99 | `FEATURE_TIERS` in `server.py`, exposed by `GET /api/pricing/config` → `boost_tiers` |
+| Online payments switch | `PAYMENTS_ENABLED=0` in production until Razorpay live activation: online checkout shows "Coming soon" (pay at venue only; attendee ₹9 fee past the free tier is collected at the venue), organizer publish fee waived past the free tier ("FREE for launch"), only the 24 h boost, free, one active boost per event | `_payments_enabled()`, `FREE_BOOST_TIERS`; app reads `/payments/config.enabled`, `/pricing/config.payments_enabled`, `/quota/me` |
 | Cancellation | allowed until 2 h before start; paid-online → Razorpay refund | `CANCEL_CUTOFF_HOURS` (frontend still hardcodes 2 h — backlog) |
 | Event verification | when `EVENT_VERIFICATION_ENABLED=true`, new events start `IN_REVIEW`; statuses `ACTIVE`, `ON_HOLD`, `REJECTED` with `hold_reasons` | `migrations/003_event_status.py` |
 | Payment methods | Razorpay online (UPI/cards/netbanking) or pay at venue; online hidden if gateway not configured | `/api/payments/*` |
