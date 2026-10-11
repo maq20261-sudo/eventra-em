@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Secret check before every commit. Enable once per clone:
+#   git config core.hooksPath .githooks
+# Picks the first Python that really runs (on Windows `python3` can be the
+# Microsoft Store placeholder).
+for py in python3 python py; do
+  if "$py" -c "import sys" >/dev/null 2>&1; then
+    exec "$py" "$(dirname "$0")/check_secrets.py"
+  fi
+done
+echo "pre-commit: Python not found - secret check skipped" >&2
