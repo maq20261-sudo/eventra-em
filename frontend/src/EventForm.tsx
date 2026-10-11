@@ -376,6 +376,17 @@ export default function EventForm({ editId }: Props) {
                   </Text>
                 </View>
               </View>
+            ) : quota.organizer.fee_waived ? (
+              // Online payments "coming soon": publishing past the free tier is free.
+              <View style={[styles.quotaBanner, styles.quotaFree]} testID="quota-banner-launch">
+                <View style={styles.quotaIcon}><Ionicons name="gift" size={18} color={colors.onLime} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.quotaTitleFree}>Publishing is FREE for launch</Text>
+                  <Text style={styles.quotaSubFree}>
+                    No publish fee for now · ₹{quota.organizer.platform_fee_inr} per event after launch
+                  </Text>
+                </View>
+              </View>
             ) : (
               <View style={[styles.quotaBanner, styles.quotaPaid]} testID="quota-banner-paid">
                 <View style={[styles.quotaIcon, { backgroundColor: colors.brand }]}><Ionicons name="card" size={18} color={colors.onBrandPrimary} /></View>

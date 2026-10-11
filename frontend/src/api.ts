@@ -145,6 +145,9 @@ export const api = {
 
   // Feature/Boost
   getFeatureTiers: (id: string) => request(`/events/${id}/feature-tiers`, { method: "GET" }),
+  // Free boost while online payments are "coming soon" (server-limited tiers).
+  boostFree: (id: string, tier: string) =>
+    request(`/events/${id}/feature`, { method: "POST", body: JSON.stringify({ tier }) }, true),
 
   // Check-in
   checkInPreview: (bookingId: string) =>

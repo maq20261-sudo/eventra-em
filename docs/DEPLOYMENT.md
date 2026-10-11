@@ -33,7 +33,9 @@ Secrets never go into git or the Docker image. On the server they live in
 
 **Change a secret on the server** (value never shown): `/opt/gatherspace/set-secret.sh KEY`, then `docker compose -f docker-compose.prod.yml up -d backend`.
 
-**When Razorpay goes live:** `set-secret.sh RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` → restart backend → add the live webhook (step 6) → test one real ₹1–₹10 payment + refund.
+**Payments switch:** production runs `PAYMENTS_ENABLED=0` ("coming soon": online checkout off, pay at venue only, organizer publish fee waived past the free tier, only the 24 h boost — free). The app reads it from `/payments/config` + `/pricing/config`, so no app release is needed to change it.
+
+**When Razorpay goes live:** `set-secret.sh RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, then `PAYMENTS_ENABLED` = `1` → restart backend → add the live webhook (step 6) → test one real ₹1–₹10 payment + refund.
 
 ---
 

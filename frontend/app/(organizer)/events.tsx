@@ -14,6 +14,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { GlowBackground } from "@/src/ui/GlowBackground";
 import { PressableScale } from "@/src/ui/PressableScale";
 import { Button } from "@/src/ui/Button";
+import { Tag } from "@/src/ui/Tag";
 import { Skeleton, SkeletonRow } from "@/src/ui/Skeleton";
 import { usePricingConfig } from "@/src/hooks/usePricing";
 
@@ -70,6 +71,9 @@ export default function OrganizerEvents() {
         label: BOOST_COPY[t.key]?.label ?? t.label,
         note: BOOST_COPY[t.key]?.note ?? "",
         popular: !!BOOST_COPY[t.key]?.popular,
+        // Older servers don't send these: treat every tier as paid + usable.
+        available: t.available ?? true,
+        free: !!t.free,
       })) ?? null,
     [pricing],
   );
@@ -99,6 +103,28 @@ export default function OrganizerEvents() {
       return labels.reduce((sum, t) => sum + (caps[t] ?? fallback), 0);
     }
     return 0;
+  };
+
+  // Server switch: online payments "coming soon" → free tiers only.
+  const paymentsSoon = pricing?.payments_enabled === false;
+
+  const runFreeBoost = async (tier: "24h" | "7d" | "30d") => {
+    if (!boostEvent) return;
+    setBoostLoading(tier);
+    setBoostError(null);
+    try {
+      await api.boostFree(boostEvent.id, tier);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setBoostSuccess("Boosted for free!");
+      setBoostEvent(null);
+      await load();
+      setTimeout(() => setBoostSuccess(null), 2500);
+    } catch (e: any) {
+      setBoostError(e?.message || "Could not boost this event");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setBoostLoading(null);
+    }
   };
 
   const runBoost = async (tier: "24h" | "7d" | "30d") => {
@@ -330,32 +356,41 @@ export default function OrganizerEvents() {
             ) : boostTiers.map((t) => (
               <Pressable
                 key={t.key}
-                style={[styles.tierRow, t.popular && styles.tierRowPopular]}
-                onPress={() => runBoost(t.key)}
-                disabled={!!boostLoading}
+                style={[styles.tierRow, t.popular && t.available && styles.tierRowPopular,
+                        !t.available && styles.tierRowSoon]}
+                onPress={() => (t.free ? runFreeBoost(t.key) : runBoost(t.key))}
+                disabled={!!boostLoading || !t.available}
                 testID={`boost-tier-${t.key}`}
               >
                 <View style={{ flex: 1 }}>
                   <View style={styles.tierLabelRow}>
-                    <Text style={styles.tierLabel}>{t.label}</Text>
-                    {t.popular && <View style={styles.popularPill}><Text style={styles.popularText}>Popular</Text></View>}
+                    <Text style={[styles.tierLabel, !t.available && { color: colors.muted }]}>{t.label}</Text>
+                    {t.free && <Tag label="FREE for launch" tone="lime" icon="gift" />}
+                    {!t.available && <Tag label="Coming soon" tone="dark" icon="time-outline" />}
+                    {t.popular && t.available && !t.free && (
+                      <View style={styles.popularPill}><Text style={styles.popularText}>Popular</Text></View>
+                    )}
                   </View>
                   <Text style={styles.tierNote}>{t.note}</Text>
                 </View>
                 <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.tierPrice}>₹{t.price.toLocaleString("en-IN")}</Text>
+                  <Text style={[styles.tierPrice, (t.free || !t.available) && styles.tierPriceStruck]}>
+                    ₹{t.price.toLocaleString("en-IN")}
+                  </Text>
                   {boostLoading === t.key ? (
                     <ActivityIndicator size="small" color={colors.brand} />
-                  ) : (
-                    <Text style={styles.tierAction}>Boost →</Text>
-                  )}
+                  ) : t.available ? (
+                    <Text style={styles.tierAction}>{t.free ? "Boost free →" : "Boost →"}</Text>
+                  ) : null}
                 </View>
               </Pressable>
             ))}
             <Text style={styles.boostFine}>
               {boostError
                 ? boostError
-                : "Powered by Razorpay · secure test-mode checkout"}
+                : paymentsSoon
+                  ? "Free 1-day boosts for launch · longer boosts coming soon"
+                  : "Powered by Razorpay · secure checkout"}
             </Text>
           </Pressable>
         </Pressable>
@@ -506,12 +541,14 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     borderColor: colors.brand, borderWidth: 2, backgroundColor: colors.brandTertiary,
     ...shadows.glow,
   },
-  tierLabelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  tierLabelRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   tierLabel: { fontSize: 16, color: colors.onSurface, fontWeight: "800" },
   popularPill: { backgroundColor: colors.brand, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   popularText: { color: colors.onBrandPrimary, fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
   tierNote: { fontSize: 12, color: colors.muted, marginTop: 2 },
   tierPrice: { fontFamily: fonts.display, fontSize: 18, color: colors.onSurface, fontWeight: "800" },
+  tierPriceStruck: { textDecorationLine: "line-through", color: colors.muted, fontSize: 15 },
+  tierRowSoon: { opacity: 0.6 },
   tierAction: { fontSize: 12, color: colors.accentText, fontWeight: "800", marginTop: 2 },
   boostFine: { fontSize: 11, color: colors.muted, textAlign: "center", marginTop: spacing.sm },
 
