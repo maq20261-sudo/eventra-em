@@ -13,11 +13,12 @@ python generate_assets.py
 
 | File | Size | Purpose |
 |---|---|---|
-| `icon.png` | 1024×1024 | Launcher / store icon (no transparency — required by the App Store) |
-| `adaptive-icon.png` | 1024×1024 | Android adaptive icon foreground; background colour `#0D0B1A` is set in `app.json` |
-| `splash-image.png` | 1024×1024 | Splash mark + wordmark (transparent); splash background `#0D0B1A` is set in `app.json` |
-| `favicon.png` | 256×256 | Web favicon |
-| `notification-icon.png` | 256×256 | White silhouette for the Android status bar |
+| `icon.png` | 1024×1024 | Launcher / store icon: G-ticket mark + stacked “Gather / Space” (no transparency — required by the App Store) |
+| `adaptive-icon.png` | 1024×1024 | Android adaptive icon foreground — lockup kept inside the 66/108 safe circle |
+| `adaptive-icon-background.png` | 1024×1024 | Android adaptive icon background (night glow); `#0D0B1A` fallback colour in `app.json` |
+| `splash-image.png` | 1024×1024 | Splash lockup (transparent), fitted inside the circle Android 12+ crops the splash to; background `#0D0B1A` and width are set in `app.json` |
+| `favicon.png` | 256×256 | Web favicon (mark only — the name is unreadable at tab size) |
+| `notification-icon.png` | 256×256 | White G-ticket silhouette for the Android status bar |
 
 Icon and splash changes only appear after a new native build
 (`eas build`), not through Metro or an OTA update.
