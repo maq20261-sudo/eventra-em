@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import Constants from "expo-constants";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/src/AuthContext";
 import { useTheme, type Colors } from "@/src/ThemeContext";
@@ -183,7 +184,7 @@ export default function Profile() {
               <Text style={styles.bodyText}>
                 A modern event booking platform for concerts, art shows, tech meetups, and more — with real-time seat selection, time-slot booking, and QR check-in.
               </Text>
-              <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Version</Text><Text style={styles.aboutValue}>1.0.0</Text></View>
+              <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Version</Text><Text style={styles.aboutValue}>{Constants.expoConfig?.version ?? "—"}</Text></View>
               <View style={styles.aboutRow}><Text style={styles.aboutLabel}>Build</Text><Text style={styles.aboutValue}>Aug 2026</Text></View>
             </View>
           )}
