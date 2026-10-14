@@ -202,10 +202,29 @@ export default function Discover() {
   useEffect(() => { locationRef.current = location; }, [location]);
   const lastMoveCheck = useRef(0);
   const checkMoved = useCallback(async () => {
-    if (Platform.OS === "web") return;
     const now = Date.now();
     if (now - lastMoveCheck.current < MOVE_CHECK_INTERVAL_MS) return;
     lastMoveCheck.current = now;
+    if (Platform.OS === "web") {
+      // Browsers: only when location is already allowed for the site, so
+      // this never pops a permission prompt on its own.
+      try {
+        if (typeof navigator === "undefined" || !navigator.geolocation || !navigator.permissions) return;
+        const perm = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+        if (perm.state !== "granted") return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const cur = locationRef.current;
+            if (distanceKm(cur.lat, cur.lng, pos.coords.latitude, pos.coords.longitude) >= LOCATION_REFRESH_KM) {
+              applyGpsLocation(pos.coords.latitude, pos.coords.longitude);
+            }
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 15 * 60_000 }
+        );
+      } catch {}
+      return;
+    }
     try {
       const perm = await Location.getForegroundPermissionsAsync();
       if (perm.status !== "granted") return; // never prompt from a background check
