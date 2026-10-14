@@ -22,7 +22,7 @@ Emergent AI platform; it is now fully decoupled and developed locally.
 - `backend/` — FastAPI + MongoDB (Motor), single `server.py`; tests in `backend/tests`.
 - `docker-compose.yml` — local stack (mongo + backend with hot reload + debugger, isolated test profile).
 - `.vscode/` — launch/tasks/settings for VS Code (debug backend in Docker, Metro, tests).
-- `deploy/` — production compose, Caddyfile, server setup + backup scripts; `.github/workflows/backend.yml` — CI/CD (tests → GHCR → Lightsail).
+- `deploy/` — production compose, Caddyfile, server setup + backup scripts; `.github/workflows/backend.yml` — CI/CD (tests → GHCR → Lightsail); `web.yml` — web app build → `https://app.gatherspace.in` (same server); `secrets.yml` — gitleaks.
 - `docs/` — project context + roadmap + `DEPLOYMENT.md` runbook (keep these updated at the end of each work session).
 
 ## Everyday commands (Windows, from repo root)

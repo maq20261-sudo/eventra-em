@@ -3,7 +3,7 @@
 What's done, what's next, and what is waiting on the owner. Every phase
 needs the owner's explicit go-ahead before implementation (see `CLAUDE.md`).
 
-_Last updated: 2026-10-11_
+_Last updated: 2026-10-15_
 
 ## Status at a glance
 
@@ -12,8 +12,9 @@ _Last updated: 2026-10-11_
 | Part A — local development (Docker, VS Code, dev build, accounts) | ✅ Done (`7bdc823`) |
 | UI/UX redesign "Neon Night" + excitement features + brand assets | ✅ Done (`a064b6f`), tested by the owner on Android dev build |
 | Part B — AWS production | ✅ Live 2026-10-11 at `https://api.gatherspace.in` (merged to `main`, deploys on push). Runs `658d363` with Razorpay **test** keys and `PAYMENTS_ENABLED=0` (KYC rejected). See `docs/DEPLOYMENT.md` → Current production setup |
-| Part C — bug fixes | ⏳ After B (some may be pulled earlier) |
-| Store release of the new app | 🔨 Next — production APK (EAS profile `production-apk`, versionCode 2) built 2026-10-11 and under owner test; then Play AAB + listing (see "Store release" below) |
+| Part C — bug fixes | ✅ Done 2026-10-14 (PR #7, `0ba146c`) — see table below; tested on the owner's phone (production APK 143) |
+| Web app `https://app.gatherspace.in` | ✅ Live 2026-10-15 (PR #8, `bb255dc`) — for iPhone users until the App Store release; tested by the owner on iPhone Safari |
+| Store release of the new app | 🔨 Next — icon/splash (1.1.0), screenshots, privacy URL done; **waiting on Google to approve the upload-key reset (requested 2026-10-13)**, then Play AAB **144** (see "Store release" below) |
 
 ## Decisions (2026-10-10)
 - `main` becomes the real branch: PR the work into `main`; deploys run from `main`.
@@ -33,24 +34,22 @@ _Last updated: 2026-10-11_
 - [x] Push `feat/neon-redesign` to GitHub (done 2026-10-10).
 - [ ] **Razorpay live activation** — rejected 2026-10-11: "Individual" business type isn't supported for event ticketing. Ask Razorpay support whether a sole proprietorship (Udyam + current account, GST if needed) is accepted, else LLP/Pvt Ltd; then reapply. Until then production runs Razorpay **test** keys — decide before the store switch-over whether to wait or temporarily disable paid online flows.
 - [ ] iOS: device registration failed during the first iOS build attempt (Apple ID / team step) — retry `npx eas-cli device:create` + build in the owner's PowerShell; note the exact error.
-- [ ] Play Console → App integrity: confirm Play App Signing, then **request upload-key reset** with the EAS upload certificate (takes Google a few days — start early).
-- [ ] Look up current store version codes (EAS remote counter is at **2**, almost certainly below Play's) (Play "App bundle explorer", App Store Connect) so new builds are higher (`npx eas-cli build:version:set`).
+- [x] Play App Signing confirmed; **upload-key reset requested 2026-10-13** with the EAS upload certificate — waiting on Google.
+- [x] Version codes: Play was at 141 (1.0.20); EAS counter set above it. Builds 142 (first AAB, pre-fixes) and 143 (production APK) used — next build is **144**.
+- [x] Firebase **Web** API key ("Browser key") restricted to `https://app.gatherspace.in/*` and `http://localhost/*` (2026-10-15; verified: other referrers get 403).
+- [ ] Account deletion screen/page — skipped for launch (owner decision 2026-10-13); Play may ask for it.
 
 ---
 
 ## Store release (next)
 
-Open questions for the owner (answer at the start of the next session):
-1. Play upload-key reset requested? (EAS keystore ≠ Emergent's upload key — Google takes a few days.)
-2. Can Emergent's production database be exported, or do we launch with a fresh database?
-3. Current privacy-policy URL — if Emergent-hosted, build simple `gatherspace.in` pages (privacy, terms, delete-account).
-4. Current Play version code → `npx eas-cli build:version:set` above it.
+Answered: upload-key reset requested (2026-10-13); **fresh database** at launch; privacy URL `https://gatherspace.in/privacy`; Play was at 141 → next AAB **144**.
 
 Steps:
-1. Owner tests the production APK (`eas build --profile production-apk -p android`) against production.
-2. Add the Play **App signing** SHA-1/SHA-256 to Firebase (phone OTP in store builds).
-3. `npx eas-cli build --profile production -p android` (AAB).
-4. Store listing: 512 icon, feature graphic, **new designed screenshot set** (Neon Night UI; plan delivered — pending owner choices: language, headlines, capture via adb/USB vs manual, timing), description, Data safety form.
+1. ✅ Production APK 143 (main `0ba146c`) tested by the owner against production — all fine incl. OTP.
+2. ✅ Play **App signing** SHA-1/SHA-256 added to Firebase.
+3. After Google approves the upload key: owner runs `npx.cmd eas-cli build --profile production -p android` (AAB 144) → upload to **Internal testing**.
+4. Store listing: icon, feature graphic `frontend/assets/images/feature-graphic.png`, 8 screenshots `frontend/store/screenshots/play/` (done), description + release notes, Data safety form, privacy URL `https://gatherspace.in/privacy`.
 5. Internal testing track → staged production rollout.
 6. iOS (after device/Apple ID issue is solved) → App Store.
 7. When both stores are live on the new backend: shut down Emergent.
@@ -114,12 +113,14 @@ Why Lightsail, not EC2: fixed price with public IPv4 and transfer included (EC2 
 | 9 | ~~Blank Razorpay keys counted as configured~~ — **fixed** (B1) | — | — |
 | 10 | Minor — **mostly fixed 2026-10-14**: booked-seats GET is read-only; `num_seats` set on every booking; seat-map cancels free `booked_count`; cancel cutoff from `/pricing/config`; LogBox warnings on in dev; seat map shrinks to fit narrow phones (scrolls with a hint below 20 dp seats) | — | Left: ESLint resolver binding; light theme polish; `test_only_past_returns_only_ended_events` relies on old data; boost tests assume `PAYMENTS_ENABLED=1` |
 
-## Web app — app.gatherspace.in (2026-10-14, branch `feat/web-app`)
+## Web app — app.gatherspace.in (✅ live 2026-10-15, PR #8)
 For iPhone users until the App Store release. Same Expo codebase built for web, served by Caddy on the Lightsail box (₹0 extra), installable as a PWA.
 - Done: web phone OTP (`src/firebase.web.ts`, Firebase JS SDK + invisible reCAPTCHA), browser dialogs for `Alert.alert` (`src/webAlert.ts`), phone-width frame on wide screens, PWA manifest + icons (`frontend/public/`), Caddy site + `web.yml` deploy, Caddy recreated by `backend.yml` when its config changes. API CORS already allows `https://*.gatherspace.in`.
 - Verified locally in Edge (iPhone size): login, Discover, event, booking, My Tickets, organizer edit, delete/cancel dialogs.
-- Owner steps: Firebase → add **Web app** + authorized domain `app.gatherspace.in`; restrict its API key to HTTP referrers; GitHub variables `FIREBASE_WEB_API_KEY` / `FIREBASE_WEB_APP_ID`; GoDaddy `A app → 65.2.231.136` **before** merging.
-- To check after go-live: OTP sign-up/reset on iPhone Safari, ticket scanner (camera via jsQR) on iPhone, Add to Home Screen.
+- Set up: GoDaddy `A app → 65.2.231.136`; Firebase Web app "GatherSpace Web" + authorized domain; GitHub variables `FIREBASE_WEB_API_KEY` / `FIREBASE_WEB_APP_ID` (values also in the git-ignored `frontend/.env`). Browser key restricted to those two referrers.
+- Verified live: HTTPS/HSTS, SPA deep links, caching (hashed assets immutable, HTML no-cache), manifest/icons, CORS; owner tested on iPhone Safari 2026-10-15 — all working (OTP sign-up/reset, scanner, Add to Home Screen).
+- Notes: the local backend's `FIREBASE_DEV_BYPASS` can't verify real Firebase tokens, so real web OTP is only testable against production. Headless browsers get a reCAPTCHA picture challenge (normal). After changing `EXPO_PUBLIC_*` values, export with `--clear` (Metro caches the old values).
+- Deploys: any `frontend/**` change on `main` rebuilds and redeploys the web app automatically (`web.yml`); native apps still need EAS builds/OTA.
 
 ## Ideas parked for later
 - Push notifications (booking reminders, new events nearby — Profile already has the preference toggles but nothing sends them).
