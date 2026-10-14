@@ -114,6 +114,13 @@ Why Lightsail, not EC2: fixed price with public IPv4 and transfer included (EC2 
 | 9 | ~~Blank Razorpay keys counted as configured~~ — **fixed** (B1) | — | — |
 | 10 | Minor — **mostly fixed 2026-10-14**: booked-seats GET is read-only; `num_seats` set on every booking; seat-map cancels free `booked_count`; cancel cutoff from `/pricing/config`; LogBox warnings on in dev; seat map shrinks to fit narrow phones (scrolls with a hint below 20 dp seats) | — | Left: ESLint resolver binding; light theme polish; `test_only_past_returns_only_ended_events` relies on old data; boost tests assume `PAYMENTS_ENABLED=1` |
 
+## Web app — app.gatherspace.in (2026-10-14, branch `feat/web-app`)
+For iPhone users until the App Store release. Same Expo codebase built for web, served by Caddy on the Lightsail box (₹0 extra), installable as a PWA.
+- Done: web phone OTP (`src/firebase.web.ts`, Firebase JS SDK + invisible reCAPTCHA), browser dialogs for `Alert.alert` (`src/webAlert.ts`), phone-width frame on wide screens, PWA manifest + icons (`frontend/public/`), Caddy site + `web.yml` deploy, Caddy recreated by `backend.yml` when its config changes. API CORS already allows `https://*.gatherspace.in`.
+- Verified locally in Edge (iPhone size): login, Discover, event, booking, My Tickets, organizer edit, delete/cancel dialogs.
+- Owner steps: Firebase → add **Web app** + authorized domain `app.gatherspace.in`; restrict its API key to HTTP referrers; GitHub variables `FIREBASE_WEB_API_KEY` / `FIREBASE_WEB_APP_ID`; GoDaddy `A app → 65.2.231.136` **before** merging.
+- To check after go-live: OTP sign-up/reset on iPhone Safari, ticket scanner (camera via jsQR) on iPhone, Add to Home Screen.
+
 ## Ideas parked for later
 - Push notifications (booking reminders, new events nearby — Profile already has the preference toggles but nothing sends them).
 - More built-in cover photos (only 4 defaults today) across categories.

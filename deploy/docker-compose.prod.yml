@@ -39,9 +39,12 @@ services:
       - "443:443/udp"
     environment:
       API_DOMAIN: ${API_DOMAIN:-api.gatherspace.in}
+      WEB_DOMAIN: ${WEB_DOMAIN:-app.gatherspace.in}
       ACME_EMAIL: ${ACME_EMAIL:-support@gatherspace.in}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Web app releases (web/current -> releases/<sha>), uploaded by web.yml.
+      - ./web:/srv/web:ro
       - caddy_data:/data
       - caddy_config:/config
     logging:

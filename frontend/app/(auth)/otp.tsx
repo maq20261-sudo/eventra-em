@@ -15,7 +15,10 @@ import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phone
 // Pull the raw Firebase Auth module so we can subscribe to
 // onAuthStateChanged for the Android SMS-Retriever auto-verify path.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const _rnfbAuth: any = (() => { try { return require("@react-native-firebase/auth"); } catch { return null; } })();
+// (Native only — the web app has no auto-verify.)
+const _rnfbAuth: any = Platform.OS === "web"
+  ? null
+  : (() => { try { return require("@react-native-firebase/auth"); } catch { return null; } })();
 
 export default function OtpScreen() {
   const router = useRouter();
