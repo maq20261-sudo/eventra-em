@@ -9,6 +9,8 @@ export type PricingConfig = {
   organizer_platform_fee_inr: number;
   attendee_free_booking_limit: number;
   organizer_free_event_limit: number;
+  /** Attendees can cancel until this many hours before the start. */
+  cancel_cutoff_hours?: number;
   boost_tiers?: BoostTier[];
 };
 

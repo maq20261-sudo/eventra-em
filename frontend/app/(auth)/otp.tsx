@@ -10,7 +10,7 @@ import { useAuth } from "@/src/AuthContext";
 import { spacing, radius, shadows, fonts } from "@/src/theme";
 import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
-import { sendOtp, verifyOtp } from "@/src/firebase";
+import { firebaseSignOut, sendOtp, verifyOtp } from "@/src/firebase";
 import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
 // Pull the raw Firebase Auth module so we can subscribe to
 // onAuthStateChanged for the Android SMS-Retriever auto-verify path.
@@ -76,6 +76,8 @@ export default function OtpScreen() {
       if (!authInstance) return;
       const onChange = async (user: any) => {
         if (!user || submittingRef.current) return;
+        // Only the number this OTP was sent to — never a leftover session.
+        if (user.phoneNumber !== session.confirmation.e164) return;
         if (!session.email || !session.password || !session.name || !session.role) return;
         submittingRef.current = true;
         setLoading(true);
@@ -90,9 +92,11 @@ export default function OtpScreen() {
             email: session.email,
             password: session.password,
             role: session.role,
+            mobile: session.mobile,
           });
           await signInWithToken(res.access_token, res.user);
           clearPhoneSession();
+          firebaseSignOut();
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
           else router.replace("/(consumer)/discover" as any);
@@ -139,9 +143,11 @@ export default function OtpScreen() {
         email: session.email,
         password: session.password,
         role: session.role,
+        mobile: session.mobile,
       });
       await signInWithToken(res.access_token, res.user);
       clearPhoneSession();
+      firebaseSignOut();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (res.user?.role === "organizer") router.replace("/(organizer)/events" as any);
       else router.replace("/(consumer)/discover" as any);

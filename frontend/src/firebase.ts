@@ -9,6 +9,7 @@ import { Platform } from "react-native";
 export type PhoneConfirmation = {
   __confirmation: any; // FirebaseAuthTypes.ConfirmationResult
   mobileMasked: string;
+  e164: string; // the number this OTP was sent to
 };
 
 // Try to import the module once; keep the whole namespace so we can pull
@@ -66,6 +67,11 @@ export async function sendOtp(mobile: string, forceResend: boolean = false): Pro
   const e164 = toE164India(mobile);
   try {
     const authInstance = resolveAuth();
+    // A Firebase user left over from an earlier verification (another
+    // number, or an expired app session) must never stand in for this OTP.
+    if (authInstance.currentUser && authInstance.currentUser.phoneNumber !== e164) {
+      await firebaseSignOut();
+    }
     let confirmation: any;
     // Prefer modular API (v25+); fall back to namespaced instance method.
     // Both support the `forceResend` third arg — pass it through so tapping
@@ -77,7 +83,7 @@ export async function sendOtp(mobile: string, forceResend: boolean = false): Pro
     } else {
       throw new Error("Verification service unavailable. Please try again.");
     }
-    return { __confirmation: confirmation, mobileMasked: maskE164(e164) };
+    return { __confirmation: confirmation, mobileMasked: maskE164(e164), e164 };
   } catch (e: any) {
     const code = e?.code || "";
     if (code.includes("invalid-phone-number"))
@@ -110,7 +116,7 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
   // .confirm() on an already-consumed session it throws
   // `auth/session-expired`. So: check for an already-signed-in user first
   // and short-circuit with their ID token before touching .confirm().
-  if (authInstance.currentUser) {
+  if (authInstance.currentUser && authInstance.currentUser.phoneNumber === conf.e164) {
     try {
       let idTokenAuto: string | null = null;
       if (typeof _fbAuth.getIdToken === "function") {
@@ -125,7 +131,9 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
   }
   try {
     const credential = await conf.__confirmation.confirm(otp);
-    const currentUser = credential?.user || authInstance.currentUser;
+    // confirm() resolves null when Android already auto-verified this OTP.
+    const signedIn = authInstance.currentUser;
+    const currentUser = credential?.user || (signedIn?.phoneNumber === conf.e164 ? signedIn : null);
     if (!currentUser) throw new Error("Verification session expired. Please try again.");
     // Modular getIdToken(user, forceRefresh) OR instance-method getIdToken(forceRefresh)
     let idToken: string | null = null;
@@ -144,7 +152,7 @@ export async function verifyOtp(conf: PhoneConfirmation, otp: string): Promise<s
     // race that happens on fast SMS Retriever devices.
     if (code.includes("session-expired") || code.includes("code-expired")) {
       const nowUser = authInstance.currentUser;
-      if (nowUser) {
+      if (nowUser && nowUser.phoneNumber === conf.e164) {
         try {
           let salvaged: string | null = null;
           if (typeof _fbAuth.getIdToken === "function") {

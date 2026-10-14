@@ -23,6 +23,7 @@ import { Button } from "@/src/ui/Button";
 import { Tag } from "@/src/ui/Tag";
 import { Skeleton } from "@/src/ui/Skeleton";
 import { EmptyState } from "@/src/ui/EmptyState";
+import { usePricingConfig } from "@/src/hooks/usePricing";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -33,8 +34,6 @@ function hoursUntil(iso: string): number {
   return (d - Date.now()) / 3_600_000;
 }
 
-const CANCEL_CUTOFF_HOURS = 2;
-
 export default function TicketScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -44,6 +43,8 @@ export default function TicketScreen() {
   const [loading, setLoading] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Cancellation window comes from the server (CANCEL_CUTOFF_HOURS).
+  const CANCEL_CUTOFF_HOURS = usePricingConfig()?.cancel_cutoff_hours ?? 2;
 
   const load = useCallback(async () => {
     // Reset while fetching so we don't flash the previous ticket's data
@@ -123,6 +124,7 @@ export default function TicketScreen() {
   const seatLine = ticketTypeValue(booking);
 
   const isCancelled = booking.status === "cancelled";
+  const eventCancelled = !!e.cancelled_at;
   const isPaidOnline = booking.payment_status === "paid";
   const isRefundPending = booking.payment_status === "refund_pending";
   const isRefundFailed = booking.payment_status === "refund_failed";
@@ -217,7 +219,7 @@ export default function TicketScreen() {
             <View style={styles.qrWrap}>
               <View style={styles.qrCancelled}>
                 <Ionicons name="ban-outline" size={72} color={colors.error} />
-                <Text style={styles.qrCancelledLabel}>Ticket cancelled</Text>
+                <Text style={styles.qrCancelledLabel}>{eventCancelled ? "Event cancelled" : "Ticket cancelled"}</Text>
               </View>
               {booking.cancelled_at && (
                 <Text style={styles.bookingId}>Cancelled · {fmtDate(booking.cancelled_at)}</Text>
@@ -241,6 +243,21 @@ export default function TicketScreen() {
             </Text>
           </View>
         </Animated.View>
+
+        {eventCancelled && (
+          <View style={[styles.noticeCard, { borderColor: colors.error + "66", backgroundColor: colors.error + "1A" }]} testID="event-cancelled-notice">
+            <Ionicons name="megaphone-outline" size={20} color={colors.error} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.noticeTitle, { color: colors.error }]}>Event cancelled by the organizer</Text>
+              <Text style={styles.noticeBody}>
+                {e.cancel_reason ? `“${e.cancel_reason}” · ` : ""}
+                {isPaidOnline || isRefundPending || isRefundFailed
+                  ? "Your payment is refunded as shown below."
+                  : "You don't need to do anything."}
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Refund state cards */}
         {isRefundPending && booking.refund && (

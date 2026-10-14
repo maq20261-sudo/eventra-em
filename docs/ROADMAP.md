@@ -104,15 +104,15 @@ Why Lightsail, not EC2: fixed price with public IPv4 and transfer included (EC2 
 | # | Issue | Where / notes | Proposed fix |
 |---|---|---|---|
 | 1 | ~~Paid but no booking~~ — **fixed in B1** (pre-check, idempotent fulfilment, auto-refund, webhook) | `_check_booking_availability`, `_fulfil_intent`, `/payments/webhook` | Remaining idea: short seat *holds* during checkout to avoid even the refund case |
-| 2 | **OTP bypass via stale Firebase user**: when the JWT expires `AuthContext.refresh` clears the token but not Firebase `currentUser`; `verifyOtp` / `otp.tsx` `onAuthStateChanged` can reuse the old user/phone | `src/AuthContext.tsx`, `src/firebase.ts`, `app/(auth)/otp.tsx` | `firebaseSignOut()` on logout/refresh failure; verify the phone of the confirmed credential matches the requested phone; server checks the ID token's phone |
-| 3 | **Time-slot oversell**: aggregate-then-`$inc` is not atomic | `_perform_booking` time-slot branch | Atomic conditional update per slot (`$expr` booked + n ≤ capacity) like the general-admission path |
-| 4 | **Event deletion orphans bookings**, no refunds | `DELETE /events/{id}` | Block deletion with active bookings, or cancel + refund all and notify |
-| 5 | **Seat list not validated** (out-of-grid seats; duplicates now rejected at order time only) | `BookingCreate` / `_perform_booking` | Validate seat ids against rows/cols, dedupe in `_perform_booking` too |
+| 2 | ~~OTP bypass via stale Firebase user~~ — **fixed 2026-10-14** (`fix/part-c-bugs`): server requires the typed mobile to match the token's phone and an OTP verified < 10 min ago (`_phone_claims`); app signs Firebase out on session expiry / after use and only reuses an auto-verified user for the same number | `_phone_claims`, `src/firebase.ts`, `otp.tsx`, `reset-password.tsx` | — |
+| 3 | ~~Oversell (time slot, and any race with the self-heal)~~ — **fixed 2026-10-14**: bookings and releases for one event run under a short Mongo lock (`_event_inventory_lock`) and check `_booked_snapshot` (bookings collection) — no more counter-based guard | `_perform_booking`, `_check_booking_availability` | — |
+| 4 | ~~Event deletion orphans bookings~~ — **fixed 2026-10-14**: DELETE refused (409) for an upcoming event with active bookings; new `POST /events/{id}/cancel` cancels + refunds every booking, hides the event, ticket shows "Event cancelled by the organizer" | `cancel_event`, `EventForm.tsx` (Cancel event) | Push notification to attendees once push exists |
+| 5 | ~~Seat list not validated~~ — **fixed 2026-10-14**: seat ids checked against the grid (A–Z × cols), duplicates rejected; rows limited to 26 | `_validate_booking_request` | — |
 | 6 | ~~Legacy signup endpoints~~ — **off in production** (B1, `ENABLE_LEGACY_AUTH`) | — | Remove the code later |
 | 7 | ~~Base64 images in Mongo~~ — **S3 in B1** (run migration 004 in prod) | `image_store.py` | — |
 | 8 | ~~`seed.py` wipes all bookings~~ — **refuses in production** (B1) | — | — |
 | 9 | ~~Blank Razorpay keys counted as configured~~ — **fixed** (B1) | — | — |
-| 10 | Minor | — | GET booked-seats writes to DB; `BookingOut.num_seats` null; frontend hardcodes 2 h cancel cutoff (read from server); `LogBox.ignoreAllLogs`; ESLint resolver binding; light theme polish; `test_only_past_returns_only_ended_events` relies on old data |
+| 10 | Minor — **mostly fixed 2026-10-14**: booked-seats GET is read-only; `num_seats` set on every booking; seat-map cancels free `booked_count`; cancel cutoff from `/pricing/config`; LogBox warnings on in dev; seat map shrinks to fit narrow phones (scrolls with a hint below 20 dp seats) | — | Left: ESLint resolver binding; light theme polish; `test_only_past_returns_only_ended_events` relies on old data; boost tests assume `PAYMENTS_ENABLED=1` |
 
 ## Ideas parked for later
 - Push notifications (booking reminders, new events nearby — Profile already has the preference toggles but nothing sends them).

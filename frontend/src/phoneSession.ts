@@ -12,7 +12,7 @@ type PhoneSession = {
   name?: string;
   email?: string;
   password?: string;
-  mobile: string; // E.164 or raw digits — used only for display
+  mobile: string; // E.164; the server checks it matches the verified phone
 };
 
 let current: PhoneSession | null = null;

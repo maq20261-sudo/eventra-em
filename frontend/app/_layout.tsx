@@ -10,7 +10,8 @@ import { AuthProvider } from "@/src/AuthContext";
 import { ThemeProvider, useTheme } from "@/src/ThemeContext";
 import { checkAndApplyUpdate } from "@/src/updates";
 
-LogBox.ignoreAllLogs(true);
+// Warnings show in development builds only (LogBox never shows in release).
+LogBox.ignoreAllLogs(!__DEV__);
 
 SplashScreen.preventAutoHideAsync();
 

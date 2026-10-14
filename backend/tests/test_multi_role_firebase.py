@@ -21,8 +21,11 @@ from motor.motor_asyncio import AsyncIOMotorClient
 BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 
-def _mock_token(uid: str, phone: str) -> str:
-    return json.dumps({"uid": uid, "phone_number": phone})
+def _mock_token(uid: str, phone: str, auth_time: int = None) -> str:
+    claims = {"uid": uid, "phone_number": phone}
+    if auth_time is not None:
+        claims["auth_time"] = auth_time
+    return json.dumps(claims)
 
 
 def _cleanup(email: str, mobile_stored: str, fbuid: str) -> None:
@@ -63,13 +66,14 @@ class TestMultiRoleFirebase:
     def teardown_method(self):
         _cleanup(self.email, self.mobile_stored, self.fbuid)
 
-    def _signup(self, role: str, email: str = None):
+    def _signup(self, role: str, email: str = None, token: str = None, mobile: str = None):
         body = {
-            "id_token": self.token,
+            "id_token": token or self.token,
             "name": "Test User",
             "email": email or self.email,
             "password": "password123",
             "role": role,
+            "mobile": mobile or self.phone_e164[3:],  # the 10 digits the user typed
         }
         return requests.post(f"{BASE_URL}/api/auth/firebase-verify", json=body)
 
@@ -123,3 +127,37 @@ class TestMultiRoleFirebase:
         body = r.json()
         assert body.get("multiple_roles") is True
         assert sorted(body["roles"]) == ["consumer", "organizer"]
+
+    # --- Stale / mismatched Firebase sessions (Part C #2) ---
+
+    def test_signup_rejects_token_for_a_different_phone(self):
+        """A Firebase user left signed in on the device for another number
+        must not be usable to sign up with the number typed now."""
+        r = self._signup("consumer", mobile="9000000001")
+        assert r.status_code == 401, r.text
+
+    def test_signup_rejects_stale_otp(self):
+        """auth_time older than 10 minutes = no fresh OTP was entered."""
+        import time
+        old = _mock_token(self.fbuid, self.phone_e164, auth_time=int(time.time()) - 3600)
+        r = self._signup("consumer", token=old)
+        assert r.status_code == 401, r.text
+
+    def _reset(self, token: str, mobile: str):
+        return requests.post(f"{BASE_URL}/api/auth/password-reset/verify", json={
+            "id_token": token, "new_password": "newpassword1", "mobile": mobile,
+        })
+
+    def test_password_reset_needs_fresh_otp_for_the_same_phone(self):
+        import time
+        assert self._signup("consumer").status_code == 200
+        typed = self.phone_e164[3:]
+        stale = _mock_token(self.fbuid, self.phone_e164, auth_time=int(time.time()) - 3600)
+        assert self._reset(stale, typed).status_code == 401
+        assert self._reset(self.token, "9000000001").status_code == 401
+        r = self._reset(self.token, typed)
+        assert r.status_code == 200, r.text
+        r = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": self.email, "password": "newpassword1",
+        })
+        assert r.status_code == 200, r.text

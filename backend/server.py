@@ -8,7 +8,10 @@ import re
 import logging
 
 log = logging.getLogger("gatherspace")
+import asyncio
 import math
+import time
+from contextlib import asynccontextmanager
 import hmac
 import hashlib
 import base64
@@ -21,6 +24,7 @@ from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
 import razorpay
+from pymongo.errors import DuplicateKeyError
 import firebase_admin_util as fb
 import image_store
 
@@ -235,6 +239,8 @@ class FirebaseVerifyBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     role: Literal["consumer", "organizer"] = "consumer"
+    # The number the user typed — must match the phone in the ID token.
+    mobile: str = Field(min_length=10, max_length=20)
 
 class PasswordResetVerifyBody(BaseModel):
     """Payload for `/auth/password-reset/verify`.
@@ -242,6 +248,8 @@ class PasswordResetVerifyBody(BaseModel):
     proving ownership of the phone → we set a new password on that user."""
     id_token: str
     new_password: str = Field(min_length=8, max_length=128)
+    # The number the user typed — must match the phone in the ID token.
+    mobile: str = Field(min_length=10, max_length=20)
     # Required when the mobile has both an attendee and organizer account.
     # If omitted and only one account exists, we reset that one.
     role: Optional[Literal["consumer", "organizer"]] = None
@@ -307,7 +315,8 @@ class EventCreate(BaseModel):
     price: float = Field(default=0.0, ge=0.0, le=10_000_000.0)
     booking_type: Literal["seat_map", "general", "time_slot"]
     # For seat_map
-    seat_rows: Optional[int] = Field(default=None, ge=1, le=100)
+    # Rows are lettered A–Z, so at most 26.
+    seat_rows: Optional[int] = Field(default=None, ge=1, le=26)
     seat_cols: Optional[int] = Field(default=None, ge=1, le=100)
     # For general
     total_seats: Optional[int] = Field(default=None, ge=1, le=1_000_000)
@@ -410,6 +419,9 @@ class EventOut(BaseModel):
     # Default ACTIVE so listings from a pre-migration DB remain visible.
     status: str = "ACTIVE"
     hold_reasons: List[str] = []
+    # Set when the organizer cancels the event (bookings cancelled + refunded).
+    cancelled_at: Optional[str] = None
+    cancel_reason: Optional[str] = None
     created_at: str
 
 class BookingCreate(BaseModel):
@@ -567,6 +579,8 @@ def event_doc_to_out(e: dict, distance_km: Optional[float] = None) -> dict:
         "featured_until": featured_until,
         "status": e.get("status", "ACTIVE"),
         "hold_reasons": list(e.get("hold_reasons") or []),
+        "cancelled_at": e.get("cancelled_at"),
+        "cancel_reason": e.get("cancel_reason"),
         "created_at": e["created_at"],
     }
 
@@ -762,6 +776,44 @@ async def otp_resend(body: OtpResend):
 
 
 # ---------- Firebase Phone Auth (SIGNUP ONLY — login uses /auth/login) -----
+# An ID token proves the phone was verified at `auth_time`, which never
+# changes when the token is refreshed. Without a freshness check a Firebase
+# user left signed in on the device (e.g. after our JWT expired) could be
+# replayed to sign up or reset a password without a new OTP.
+FIREBASE_OTP_MAX_AGE_SECONDS = 10 * 60
+
+
+def _phone_claims(id_token: str, typed_mobile: str, generic_error: Optional[str] = None) -> tuple:
+    """Verify a Firebase ID token for a fresh OTP on the number the user
+    typed. Returns (mobile_stored, firebase_uid). `generic_error` replaces
+    detailed messages where we must not leak account information."""
+    try:
+        claims = fb.verify_id_token(id_token)
+    except fb.FirebaseAuthError as e:
+        raise HTTPException(status_code=401, detail=generic_error or str(e))
+    phone_number = claims.get("phone_number")
+    firebase_uid = claims.get("uid") or claims.get("user_id")
+    if not phone_number or not firebase_uid:
+        raise HTTPException(status_code=400, detail="Firebase token missing phone number claim")
+    try:
+        typed = fb.normalize_e164(typed_mobile)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Please enter a valid mobile number.")
+    if typed != phone_number:
+        log.warning("firebase token phone does not match the typed mobile")
+        raise HTTPException(
+            status_code=401,
+            detail=generic_error or "Verification doesn't match this mobile number. Please request a new OTP.",
+        )
+    auth_time = int(claims.get("auth_time") or 0)
+    if time.time() - auth_time > FIREBASE_OTP_MAX_AGE_SECONDS:
+        raise HTTPException(
+            status_code=401,
+            detail=generic_error or "Verification expired. Please request a new OTP.",
+        )
+    return phone_number.lstrip("+"), firebase_uid
+
+
 @api_router.post("/auth/firebase-verify", response_model=TokenResponse)
 async def firebase_verify(body: FirebaseVerifyBody):
     """Signup endpoint. The app runs a Firebase Phone Auth challenge on the
@@ -775,17 +827,7 @@ async def firebase_verify(body: FirebaseVerifyBody):
     """
     if not fb.is_enabled():
         raise HTTPException(status_code=503, detail="Firebase Admin not configured on server")
-    try:
-        claims = fb.verify_id_token(body.id_token)
-    except fb.FirebaseAuthError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-
-    phone_number = claims.get("phone_number")
-    firebase_uid = claims.get("uid") or claims.get("user_id")
-    if not phone_number or not firebase_uid:
-        raise HTTPException(status_code=400, detail="Firebase token missing phone number claim")
-
-    mobile_stored = phone_number.lstrip("+")
+    mobile_stored, firebase_uid = _phone_claims(body.id_token, body.mobile)
     email = body.email.strip().lower()
     name = body.name.strip()
 
@@ -876,17 +918,11 @@ async def password_reset_verify(body: PasswordResetVerifyBody):
     """
     if not fb.is_enabled():
         raise HTTPException(status_code=503, detail="Verification service is unavailable. Please try again later.")
-    try:
-        claims = fb.verify_id_token(body.id_token)
-    except fb.FirebaseAuthError as e:
-        # Deliberately generic — never leak whether a phone/email is registered.
-        raise HTTPException(status_code=401, detail="Verification failed. Please request a new OTP and retry.")
-
-    phone_number = claims.get("phone_number")
-    firebase_uid = claims.get("uid") or claims.get("user_id")
-    if not phone_number:
-        raise HTTPException(status_code=400, detail="Missing phone number in verification token.")
-    mobile_stored = phone_number.lstrip("+")
+    # Deliberately generic — never leak whether a phone/email is registered.
+    mobile_stored, firebase_uid = _phone_claims(
+        body.id_token, body.mobile,
+        generic_error="Verification failed. Please request a new OTP and retry.",
+    )
 
     # Find ALL users on this mobile (up to two: attendee + organizer).
     users = await db.users.find({"mobile": mobile_stored}).to_list(None)
@@ -1216,6 +1252,7 @@ async def list_events(
     # filter) to see their in-review / on-hold entries.
     if _event_verification_enabled():
         query["status"] = "ACTIVE"
+    query["cancelled_at"] = None  # cancelled events leave Discover
     events = await db.events.find(query, {"_id": 0}).to_list(1000)
     # Compute "past" flag using end_date (fallback: legacy `date`). Filter
     # out ended events from the default discover list; keep only past ones
@@ -1343,6 +1380,8 @@ async def update_event(event_id: str, body: EventUpdate, user=Depends(require_ro
         raise HTTPException(status_code=404, detail="Event not found")
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
+    if e.get("cancelled_at"):
+        raise HTTPException(status_code=400, detail="A cancelled event can't be edited.")
     update_data = {k: v for k, v in body.model_dump().items() if v is not None}
     if "image_url" in update_data:
         update_data["image_url"] = await image_store.persist_image(update_data["image_url"])
@@ -1412,17 +1451,95 @@ async def delete_event(event_id: str, user=Depends(require_role("organizer"))):
         raise HTTPException(status_code=404, detail="Event not found")
     if e["organizer_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not your event")
+    # Part C #4: an upcoming event with live tickets must be cancelled (which
+    # cancels + refunds the bookings), not deleted out from under attendees.
+    end_iso = e.get("end_date") or e.get("date")
+    ended = bool(end_iso and end_iso < datetime.now(timezone.utc).isoformat())
+    if not ended:
+        active = await db.bookings.count_documents(
+            {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}
+        )
+        if active:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This event has {active} active booking(s), so it can't be deleted. "
+                    "Cancel the event instead: attendees' tickets are cancelled and "
+                    "online payments refunded."
+                ),
+            )
     await db.events.delete_one({"id": event_id})
     return {"ok": True}
 
-async def _reconcile_event_availability(event_id: str) -> dict:
-    """Rebuild `booked_seats`, `booked_slots`, `seats_by_slot`, and
-    `booked_count` on the event doc based on the actual bookings collection
-    — the source of truth. This self-heals any drift caused by stale data or
-    aborted rollbacks so the atomic booking guard is always consistent with
-    the seat-availability view. Returns the reconciled event doc (or None
-    if missing).
-    """
+
+class EventCancelBody(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=300)
+
+
+@api_router.post("/events/{event_id}/cancel")
+async def cancel_event(event_id: str, body: EventCancelBody, user=Depends(require_role("organizer"))):
+    """Organizer cancels an upcoming event: every unused booking is
+    cancelled (paid-online ones refunded) and the event leaves Discover.
+    Attendees see "Event cancelled by organizer" on their tickets."""
+    e = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if e["organizer_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Not your event")
+    end_iso = e.get("end_date") or e.get("date")
+    if end_iso and end_iso < datetime.now(timezone.utc).isoformat():
+        raise HTTPException(status_code=400, detail="This event has already ended.")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    reason = (body.reason or "").strip() or None
+    # Claim the cancellation once, so a double tap can't run it twice.
+    claimed_event = await db.events.find_one_and_update(
+        {"id": event_id, "cancelled_at": None},
+        {"$set": {"cancelled_at": now_iso, "cancel_reason": reason, "featured_until": None}},
+    )
+    if not claimed_event:
+        raise HTTPException(status_code=409, detail="This event is already cancelled.")
+
+    cancelled = refunds_started = refunds_failed = 0
+    bookings = await db.bookings.find(
+        {"event_id": event_id, "status": "confirmed", "checked_in": {"$ne": True}}, {"_id": 0}
+    ).to_list(None)
+    for b in bookings:
+        # Same atomic claim as an attendee cancel, so a booking is never
+        # cancelled (or refunded) twice.
+        claimed = await db.bookings.find_one_and_update(
+            {"id": b["id"], "status": "confirmed", "checked_in": {"$ne": True}},
+            {"$set": {"status": "cancelling", "cancelling_at": now_iso}},
+        )
+        if not claimed:
+            continue
+        update_doc: Dict[str, Any] = {
+            "status": "cancelled",
+            "cancelled_at": now_iso,
+            "cancelled_by": "organizer",
+        }
+        update_doc.update(await _refund_if_paid_online(claimed))
+        await db.bookings.update_one({"id": b["id"]}, {"$set": update_doc})
+        cancelled += 1
+        if update_doc.get("payment_status") == "refund_pending":
+            refunds_started += 1
+        elif update_doc.get("payment_status") == "refund_failed":
+            refunds_failed += 1
+
+    async with _event_inventory_lock(event_id):
+        await _reconcile_event_availability(event_id)
+    log.info("event %s cancelled by organizer: %d booking(s), %d refund(s) started, %d failed",
+             event_id, cancelled, refunds_started, refunds_failed)
+    return {
+        "ok": True,
+        "cancelled_bookings": cancelled,
+        "refunds_started": refunds_started,
+        "refunds_failed": refunds_failed,
+    }
+
+async def _booked_snapshot(event_id: str) -> dict:
+    """What confirmed + checked-in bookings (the source of truth) hold for
+    an event: flat seat list, seats per slot, units per seatless time slot
+    and the total unit count."""
     bookings = await db.bookings.find(
         {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}},
         {"_id": 0, "seats": 1, "time_slot": 1, "num_seats": 1},
@@ -1433,6 +1550,8 @@ async def _reconcile_event_availability(event_id: str) -> dict:
     # For seat_map + slots events: {slot_label: [seat_labels]}. For
     # slotless seat_map events the empty-string key holds all seats.
     seats_by_slot: dict = {}
+    # Units booked per slot by seatless time_slot bookings.
+    slot_units: dict = {}
     for b in bookings:
         seats = b.get("seats") or []
         slot = b.get("time_slot")
@@ -1445,27 +1564,69 @@ async def _reconcile_event_availability(event_id: str) -> dict:
                 booked_slots.append(slot)
         elif slot:
             # time_slot booking without seats — supports num_seats>1.
+            units = int(b.get("num_seats") or 1)
             booked_slots.append(slot)
-            booked_count += int(b.get("num_seats") or 1)
+            booked_count += units
+            slot_units[slot] = slot_units.get(slot, 0) + units
         elif b.get("num_seats"):
             booked_count += int(b["num_seats"] or 0)
+    return {
+        "booked_seats": booked_seats,
+        "booked_slots": booked_slots,
+        "seats_by_slot": seats_by_slot,
+        "booked_count": booked_count,
+        "slot_units": slot_units,
+    }
+
+
+async def _reconcile_event_availability(event_id: str) -> dict:
+    """Rebuild the event doc's display copies (`booked_seats`, `booked_slots`,
+    `seats_by_slot`, `booked_count`) from the bookings collection. Returns
+    the updated event doc (or None if missing). Availability checks never
+    rely on these copies — they read `_booked_snapshot` under the event lock.
+    """
+    snap = await _booked_snapshot(event_id)
     return await db.events.find_one_and_update(
         {"id": event_id},
-        {"$set": {
-            "booked_seats": booked_seats,
-            "booked_slots": booked_slots,
-            "seats_by_slot": seats_by_slot,
-            "booked_count": booked_count,
-        }},
+        {"$set": {k: snap[k] for k in ("booked_seats", "booked_slots", "seats_by_slot", "booked_count")}},
         return_document=True,
     )
 
 
+@asynccontextmanager
+async def _event_inventory_lock(event_id: str):
+    """Serialise everything that takes or frees an event's seats/places,
+    across all API workers. A lock doc is upserted only when no live lock
+    exists (a held lock makes the upsert hit the unique `_id`); it expires
+    after 15 s so a crashed worker can't block the event."""
+    owner = uuid.uuid4().hex
+    deadline = time.monotonic() + 10
+    while True:
+        now = datetime.now(timezone.utc)
+        try:
+            await db.inventory_locks.update_one(
+                {"_id": event_id, "until": {"$lt": now}},
+                {"$set": {"until": now + timedelta(seconds=15), "owner": owner}},
+                upsert=True,
+            )
+            break
+        except DuplicateKeyError:
+            if time.monotonic() > deadline:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Lots of people are booking this event right now. Please try again.",
+                )
+            await asyncio.sleep(0.05)
+    try:
+        yield
+    finally:
+        await db.inventory_locks.delete_one({"_id": event_id, "owner": owner})
+
+
 @api_router.get("/events/{event_id}/booked-seats")
 async def get_booked_seats(event_id: str, time_slot: Optional[str] = None):
-    # Self-heal on read so the frontend seat map and the atomic booking
-    # guard always see the same source of truth.
-    e = await _reconcile_event_availability(event_id)
+    # Read-only: computed straight from the bookings collection.
+    e = await db.events.find_one({"id": event_id}, {"_id": 0, "id": 1})
     if e is None:
         raise HTTPException(status_code=404, detail="Event not found")
     query: dict = {"event_id": event_id, "status": {"$in": ["confirmed", "checked_in"]}}
@@ -1475,9 +1636,11 @@ async def get_booked_seats(event_id: str, time_slot: Optional[str] = None):
     booked_seats = []
     booked_slots = []
     total_general = 0
+    seats_by_slot: dict = {}
     for b in bookings:
         if b.get("seats"):
             booked_seats.extend(b["seats"])
+            seats_by_slot.setdefault(b.get("time_slot") or "", []).extend(b["seats"])
         if b.get("time_slot") and not b.get("seats"):
             booked_slots.append(b["time_slot"])
         if b.get("num_seats") and not b.get("seats"):
@@ -1486,7 +1649,7 @@ async def get_booked_seats(event_id: str, time_slot: Optional[str] = None):
         "booked_seats": booked_seats,
         "booked_slots": booked_slots,
         "total_general_booked": total_general,
-        "seats_by_slot": (e.get("seats_by_slot") if not time_slot else None),
+        "seats_by_slot": (seats_by_slot if not time_slot else None),
     }
 
 @api_router.get("/organizer/events", response_model=List[EventOut])
@@ -1504,60 +1667,85 @@ async def my_events(user=Depends(require_role("organizer"))):
 
 # ---------- Booking Routes ----------
 
-async def _slot_booked_units(event_id: str, time_slot: str) -> int:
-    """Seats already taken in a time slot (confirmed + checked-in bookings)."""
-    agg = db.bookings.aggregate([
-        {"$match": {
-            "event_id": event_id,
-            "time_slot": time_slot,
-            "status": {"$in": ["confirmed", "checked_in"]},
-        }},
-        {"$group": {"_id": None, "n": {"$sum": {"$ifNull": ["$num_seats", 1]}}}},
-    ])
-    existing = 0
-    async for row in agg:
-        existing = int(row.get("n") or 0)
-    return existing
+SEAT_ID_RE = re.compile(r"^([A-Z])([1-9][0-9]*)$")
+
+
+def _validate_booking_request(
+    event: dict, seats: Optional[List[str]], num_seats: Optional[int], time_slot: Optional[str]
+) -> int:
+    """Check the request's shape against the event and return the number of
+    units (seats / tickets / slot places) it books."""
+    bt = event["booking_type"]
+    if bt == "seat_map":
+        if not seats:
+            raise HTTPException(status_code=400, detail="Please select seats")
+        if len(set(seats)) != len(seats):
+            raise HTTPException(status_code=400, detail="The same seat was selected twice.")
+        # Same grid defaults as the app's seat map.
+        rows = int(event.get("seat_rows") or 6)
+        cols = int(event.get("seat_cols") or 8)
+        for s in seats:
+            m = SEAT_ID_RE.match(s or "")
+            if not m or ord(m.group(1)) - ord("A") >= rows or int(m.group(2)) > cols:
+                raise HTTPException(status_code=400, detail=f"Seat {s} doesn't exist for this event.")
+        if event.get("time_slots"):
+            if not time_slot:
+                raise HTTPException(status_code=400, detail="Please pick a time slot")
+            if time_slot not in event["time_slots"]:
+                raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
+        return len(seats)
+    if bt == "general":
+        if not num_seats or num_seats < 1:
+            raise HTTPException(status_code=400, detail="Please choose number of seats")
+        return int(num_seats)
+    if bt == "time_slot":
+        if not time_slot:
+            raise HTTPException(status_code=400, detail="Please pick a time slot")
+        if time_slot not in (event.get("time_slots") or []):
+            raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
+        units = int(num_seats or 1)
+        if units < 1:
+            raise HTTPException(status_code=400, detail="Please choose at least 1 seat")
+        return units
+    raise HTTPException(status_code=400, detail="Invalid booking type")
 
 
 async def _check_booking_availability(
     event: dict, seats: Optional[List[str]], num_seats: Optional[int], time_slot: Optional[str]
-) -> None:
-    """Pre-check run BEFORE a Razorpay order is created, so we don't take
-    money for seats/slots that are already gone. `_perform_booking`'s atomic
-    reservation remains the final guard (a race can still slip through —
-    that case is auto-refunded at verify time)."""
+) -> int:
+    """Validate the request and check it fits in what's left, reading the
+    bookings collection directly. Returns the number of units. Used before
+    a Razorpay order is created (so we don't take money for seats that are
+    gone) and again by `_perform_booking` under the event lock, where it is
+    the final guard."""
+    units = _validate_booking_request(event, seats, num_seats, time_slot)
     bt = event["booking_type"]
-    if bt in ("seat_map", "time_slot"):
-        event = await _reconcile_event_availability(event["id"]) or event
-    if bt == "seat_map" and seats:
-        if len(set(seats)) != len(seats):
-            raise HTTPException(status_code=400, detail="The same seat was selected twice.")
-        if event.get("time_slots") and time_slot:
-            taken = set((event.get("seats_by_slot") or {}).get(time_slot, []))
+    snap = await _booked_snapshot(event["id"])
+    if bt == "seat_map":
+        if event.get("time_slots"):
+            taken = set(snap["seats_by_slot"].get(time_slot, []))
         else:
-            taken = set(event.get("booked_seats") or [])
+            taken = set(snap["booked_seats"])
         conflict = [s for s in seats if s in taken]
         if conflict:
             raise HTTPException(
                 status_code=409,
                 detail=f"Seat(s) already booked: {', '.join(conflict)}. Please pick different seats.",
             )
-    elif bt == "general" and num_seats:
+    elif bt == "general":
         capacity = int(event.get("total_seats") or 0)
-        booked = int(event.get("booked_count") or 0)
-        if booked + int(num_seats) > capacity:
+        booked = int(snap["booked_count"])
+        if booked + units > capacity:
             remaining = max(0, capacity - booked)
             raise HTTPException(
                 status_code=409,
                 detail=(f"Only {remaining} ticket(s) left." if remaining else "This event is sold out."),
             )
-    elif bt == "time_slot" and time_slot:
+    elif bt == "time_slot":
         slot_caps: Dict[str, int] = event.get("slot_capacities") or {}
         fallback_cap = int(event.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
         slot_cap = int(slot_caps.get(time_slot, fallback_cap))
-        existing = await _slot_booked_units(event["id"], time_slot)
-        units = int(num_seats or 1)
+        existing = int(snap["slot_units"].get(time_slot, 0))
         if existing + units > slot_cap:
             remaining = max(0, slot_cap - existing)
             raise HTTPException(
@@ -1565,12 +1753,15 @@ async def _check_booking_availability(
                 detail=(f"Only {remaining} seat(s) left in this slot." if remaining
                         else "This slot is fully booked."),
             )
+    return units
 
 
 async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Dict[str, Any]] = None) -> BookingOut:
     event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+    if event.get("cancelled_at"):
+        raise HTTPException(status_code=400, detail="This event was cancelled by the organizer.")
 
     # Reject bookings on ended events. Uses end_date (or legacy `date`).
     end_iso = event.get("end_date") or event.get("date")
@@ -1587,132 +1778,10 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
             detail="This event is not currently accepting bookings.",
         )
 
-    # SEC-003 fix: compute price + units up front, then perform an ATOMIC
-    # capacity/uniqueness check via `findOneAndUpdate` on the events doc.
-    # Two concurrent bookings can no longer both pass a stale read.
-    #
-    # Additionally, to guard against drift between event.booked_seats/slots
-    # and the bookings collection (source of truth), we reconcile on failure
-    # and retry once — this eliminates a class of "seat just booked" false
-    # rejections caused by stale array state.
     booking_id = str(uuid.uuid4())
     booking_type = event["booking_type"]
-
-    async def _try_reserve():
-        if booking_type == "seat_map":
-            if not body.seats:
-                raise HTTPException(status_code=400, detail="Please select seats")
-            has_slots = bool(event.get("time_slots"))
-            if has_slots:
-                if not body.time_slot:
-                    raise HTTPException(status_code=400, detail="Please pick a time slot")
-                if body.time_slot not in (event.get("time_slots") or []):
-                    raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
-                # Check slot-specific booked seats.
-                seats_by_slot = event.get("seats_by_slot") or {}
-                already = set(seats_by_slot.get(body.time_slot, []))
-                conflict = [s for s in body.seats if s in already]
-                if conflict:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Seat(s) already booked for this slot: {', '.join(conflict)}",
-                    )
-                price = event["price"] * len(body.seats)
-                units = len(body.seats)
-                slot_key = f"seats_by_slot.{body.time_slot}"
-                cond = {
-                    "id": body.event_id,
-                    f"seats_by_slot.{body.time_slot}": {"$not": {"$elemMatch": {"$in": body.seats}}},
-                }
-                upd = {
-                    "$inc": {"booked_count": units},
-                    "$push": {slot_key: {"$each": body.seats}},
-                }
-                return price, units, await db.events.find_one_and_update(cond, upd)
-            # Slotless seat_map (legacy): booked_seats is a flat list.
-            price = event["price"] * len(body.seats)
-            units = len(body.seats)
-            cond = {
-                "id": body.event_id,
-                "booked_seats": {"$not": {"$elemMatch": {"$in": body.seats}}},
-            }
-            upd = {
-                "$inc": {"booked_count": units},
-                "$push": {"booked_seats": {"$each": body.seats}},
-            }
-            return price, units, await db.events.find_one_and_update(cond, upd)
-
-        if booking_type == "general":
-            if not body.num_seats or body.num_seats < 1:
-                raise HTTPException(status_code=400, detail="Please choose number of seats")
-            price = event["price"] * body.num_seats
-            units = body.num_seats
-            capacity = int(event.get("total_seats") or 0)
-            cond = {
-                "id": body.event_id,
-                "$expr": {"$lte": [{"$add": [{"$ifNull": ["$booked_count", 0]}, units]}, capacity]},
-            }
-            upd = {"$inc": {"booked_count": units}}
-            return price, units, await db.events.find_one_and_update(cond, upd)
-
-        if booking_type == "time_slot":
-            if not body.time_slot:
-                raise HTTPException(status_code=400, detail="Please pick a time slot")
-            if body.time_slot not in (event.get("time_slots") or []):
-                raise HTTPException(status_code=400, detail="Selected slot is not available for this event.")
-            # Per-slot capacity (falls back to slot_capacity for legacy events).
-            slot_caps: Dict[str, int] = event.get("slot_capacities") or {}
-            fallback_cap = int(event.get("slot_capacity") or DEFAULT_SLOT_CAPACITY)
-            slot_cap = int(slot_caps.get(body.time_slot, fallback_cap))
-            # Allow group booking: num_seats optional, defaults to 1 for back-compat.
-            units = int(body.num_seats or 1)
-            if units < 1:
-                raise HTTPException(status_code=400, detail="Please choose at least 1 seat")
-            price = event["price"] * units
-            # Sum booked seats for this slot from confirmed/checked_in bookings.
-            existing = await _slot_booked_units(body.event_id, body.time_slot)
-            if existing + units > slot_cap:
-                remaining = max(0, slot_cap - existing)
-                raise HTTPException(
-                    status_code=409,
-                    detail=(f"Only {remaining} seat(s) left in this slot." if remaining > 0
-                            else f"This slot is fully booked ({slot_cap}/{slot_cap} seats)."),
-                )
-            # Atomic guard: increment global booked_count; mark slot in
-            # booked_slots array once it becomes full so legacy clients still
-            # see it as unavailable.
-            cond = {"id": body.event_id}
-            upd = {"$inc": {"booked_count": units}}
-            if existing + units >= slot_cap:
-                upd["$addToSet"] = {"booked_slots": body.time_slot}
-            return price, units, await db.events.find_one_and_update(cond, upd)
-
-        raise HTTPException(status_code=400, detail="Invalid booking type")
-
-    # For seat_map / time_slot bookings, always reconcile the event doc's
-    # booked_seats / booked_slots from the bookings collection BEFORE the
-    # atomic guard. This closes an oversell hole: if the event doc *under*-
-    # reports a real booking (drift or partial rollback), the atomic guard's
-    # first attempt would otherwise succeed and create a duplicate. Cheap
-    # single roundtrip; safer than a retry-on-failure loop.
-    if booking_type in ("seat_map", "time_slot"):
-        event = await _reconcile_event_availability(body.event_id) or event
-
-    total_price, num_units, result = await _try_reserve()
-    if not result:
-        # Over-reporting drift: some seats/slots are stale in the event array
-        # but no real booking exists for them. Reconcile + retry once.
-        await _reconcile_event_availability(body.event_id)
-        event = await db.events.find_one({"id": body.event_id}, {"_id": 0}) or event
-        total_price, num_units, result = await _try_reserve()
-
-    if not result:
-        if booking_type == "seat_map":
-            raise HTTPException(status_code=409, detail="One or more selected seats were just booked. Please pick different seats.")
-        if booking_type == "general":
-            raise HTTPException(status_code=409, detail="Not enough seats available")
-        if booking_type == "time_slot":
-            raise HTTPException(status_code=409, detail="Time slot already booked")
+    num_units = _validate_booking_request(event, body.seats, body.num_seats, body.time_slot)
+    total_price = event["price"] * num_units
 
     # Attendee-side platform fee. Applied uniformly whether paying online
     # (already included in Razorpay amount) or at the venue (represents an
@@ -1724,13 +1793,12 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         "id": booking_id,
         "event_id": body.event_id,
         "user_id": user["id"],
-        "seats": body.seats,
-        # For time_slot events, `num_units` reflects the actual number of
-        # seats booked (defaults to 1). For general, it mirrors body.num_seats.
-        "num_seats": num_units if booking_type in ("general", "time_slot") else body.num_seats,
+        "seats": body.seats if booking_type == "seat_map" else None,
+        # Units booked: seats picked, tickets, or places in the slot.
+        "num_seats": num_units,
         "time_slot": body.time_slot,
         "total_price": total_price,
-        # NEW: platform fee & grand total captured on the booking so the
+        # Platform fee & grand total captured on the booking so the
         # ticket / confirmation screens can render an accurate breakdown.
         "platform_fee_inr": platform_fee_inr,
         "platform_fee_waived": bool(fee_info.get("waived")),
@@ -1740,19 +1808,15 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         "payment": payment,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    try:
+
+    # Part C #3: one booking at a time per event. The availability check
+    # reads the bookings collection itself, so two requests can never both
+    # take the last seat or slot place (a payment that loses this race is
+    # refunded by the caller).
+    async with _event_inventory_lock(body.event_id):
+        await _check_booking_availability(event, body.seats, body.num_seats, body.time_slot)
         await db.bookings.insert_one(doc)
-    except Exception:
-        # Roll back the reservation if the booking insert fails.
-        rollback: Dict[str, Any] = {"$inc": {"booked_count": -num_units}}
-        if booking_type == "seat_map":
-            rollback["$pullAll"] = {"booked_seats": body.seats}
-            if body.time_slot:
-                rollback["$pull"] = {f"seats_by_slot.{body.time_slot}": {"$in": body.seats}}
-        elif booking_type == "time_slot":
-            rollback["$pull"] = {"booked_slots": body.time_slot}
-        await db.events.update_one({"id": body.event_id}, rollback)
-        raise
+        event = await _reconcile_event_availability(body.event_id) or event
 
     return BookingOut(
         id=booking_id,
@@ -1760,8 +1824,8 @@ async def _perform_booking(body: BookingCreate, user: dict, payment: Optional[Di
         event=EventOut(**event_doc_to_out(event)),
         user_id=user["id"],
         user_name=user.get("name"),
-        seats=body.seats,
-        num_seats=body.num_seats,
+        seats=doc["seats"],
+        num_seats=num_units,
         time_slot=body.time_slot,
         total_price=total_price,
         platform_fee_inr=platform_fee_inr,
@@ -1817,41 +1881,33 @@ CANCEL_CUTOFF_HOURS = int(os.environ.get("CANCEL_CUTOFF_HOURS", "2"))
 
 async def _release_booking_inventory(booking: dict) -> None:
     """Free up the seats / slots / count that this booking was holding so a
-    cancellation makes room for other users to book."""
-    event_id = booking["event_id"]
-    if booking.get("seats"):
-        # Remove from the flat booked_seats list (slotless legacy path).
-        await db.events.update_one(
-            {"id": event_id},
-            {"$pullAll": {"booked_seats": booking["seats"]}},
-        )
-        # Also remove from the slot-scoped map when the booking carried a slot.
-        if booking.get("time_slot"):
-            await db.events.update_one(
-                {"id": event_id},
-                {"$pull": {f"seats_by_slot.{booking['time_slot']}": {"$in": booking["seats"]}}},
-            )
-    if booking.get("num_seats"):
-        await db.events.update_one(
-            {"id": event_id},
-            {"$inc": {"booked_count": -int(booking["num_seats"])}},
-        )
-    if booking.get("time_slot") and not booking.get("seats"):
-        # Same multi-user slot logic as before (only for time_slot bookings
-        # that don't carry seats — a seat_map+slot booking should NOT touch
-        # booked_slots since we track availability per-seat there).
-        slot = booking["time_slot"]
-        still_held = await db.bookings.count_documents({
-            "event_id": event_id,
-            "time_slot": slot,
-            "id": {"$ne": booking["id"]},
-            "status": {"$in": ["confirmed", "checked_in"]},
-        })
-        if still_held == 0:
-            await db.events.update_one(
-                {"id": event_id},
-                {"$pull": {"booked_slots": slot}},
-            )
+    cancellation makes room for other users to book. The booking must already
+    have left the confirmed state; the event's copies are rebuilt from the
+    remaining bookings (this also fixes seat bookings never giving back
+    their `booked_count`)."""
+    async with _event_inventory_lock(booking["event_id"]):
+        await _reconcile_event_availability(booking["event_id"])
+
+async def _refund_if_paid_online(booking: dict) -> Dict[str, Any]:
+    """Start a Razorpay refund for a booking paid online. Returns the fields
+    to set on the booking (empty for free / pay-at-venue bookings)."""
+    payment = booking.get("payment") or {}
+    was_paid_online = (
+        booking.get("payment_status") == "paid"
+        and payment.get("provider") == "razorpay"
+        and payment.get("payment_id")
+    )
+    if not was_paid_online:
+        return {}
+    refund = await _issue_razorpay_refund(payment)
+    out: Dict[str, Any] = {"refund": refund}
+    # Update payment_status based on refund outcome.
+    if refund.get("status") == "refund_pending":
+        out["payment_status"] = "refund_pending"
+    elif refund.get("status") == "refund_failed":
+        out["payment_status"] = "refund_failed"
+    return out
+
 
 def _cancellation_error(reason: str, code: int = 400) -> HTTPException:
     return HTTPException(status_code=code, detail=reason)
@@ -1967,20 +2023,7 @@ async def cancel_booking(booking_id: str, user=Depends(get_current_user)):
         logging.warning("release_booking_inventory failed for %s: %s", booking_id, exc)
 
     # 2. If the booking was paid online, initiate refund via Razorpay.
-    payment = claimed.get("payment") or {}
-    was_paid_online = (
-        claimed.get("payment_status") == "paid"
-        and payment.get("provider") == "razorpay"
-        and payment.get("payment_id")
-    )
-    if was_paid_online:
-        refund = await _issue_razorpay_refund(payment)
-        update_doc["refund"] = refund
-        # Update payment_status based on refund outcome.
-        if refund.get("status") == "refund_pending":
-            update_doc["payment_status"] = "refund_pending"
-        elif refund.get("status") == "refund_failed":
-            update_doc["payment_status"] = "refund_failed"
+    update_doc.update(await _refund_if_paid_online(claimed))
 
     await db.bookings.update_one({"id": booking_id}, {"$set": update_doc})
 
@@ -2023,6 +2066,8 @@ async def _apply_boost(event_id: str, user: dict, tier: str, payment: Optional[D
         raise HTTPException(status_code=403, detail="Not your event")
     if tier not in FEATURE_TIERS:
         raise HTTPException(status_code=400, detail="Invalid tier")
+    if e.get("cancelled_at"):
+        raise HTTPException(status_code=400, detail="This event was cancelled.")
     t = FEATURE_TIERS[tier]
     now = datetime.now(timezone.utc)
     current_until = e.get("featured_until")
@@ -2261,6 +2306,7 @@ async def pricing_config():
         "organizer_platform_fee_inr": PLATFORM_FEE_ORGANIZER_PAISE / 100.0,
         "attendee_free_booking_limit": ATTENDEE_FREE_BOOKING_LIMIT,
         "organizer_free_event_limit": ORGANIZER_FREE_EVENT_LIMIT,
+        "cancel_cutoff_hours": CANCEL_CUTOFF_HOURS,
         # Boost prices are the single source of truth for the app's Boost
         # sheet — never hardcode them client-side (they drifted once).
         # While payments are off only FREE_BOOST_TIERS are usable (free);
@@ -2375,6 +2421,8 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
         event = await db.events.find_one({"id": body.event_id}, {"_id": 0})
         if not event:
             raise HTTPException(status_code=404, detail="Event not found")
+        if event.get("cancelled_at"):
+            raise HTTPException(status_code=400, detail="This event was cancelled by the organizer.")
         # Block payment orders for events that have already ended.
         end_iso = event.get("end_date") or event.get("date")
         if end_iso and end_iso < datetime.now(timezone.utc).isoformat():
@@ -2418,6 +2466,8 @@ async def create_payment_order(body: PaymentOrderCreate, user=Depends(get_curren
             raise HTTPException(status_code=404, detail="Event not found")
         if ev["organizer_id"] != user["id"]:
             raise HTTPException(status_code=403, detail="Not your event")
+        if ev.get("cancelled_at"):
+            raise HTTPException(status_code=400, detail="This event was cancelled.")
         tier_cfg = FEATURE_TIERS[body.tier]
         amount_inr = float(tier_cfg["price"])
         amount_paise = int(round(amount_inr * 100))

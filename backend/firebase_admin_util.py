@@ -9,6 +9,7 @@ Loading strategy (safe for missing credentials during dev):
 from __future__ import annotations
 import os
 import re
+import time
 import logging
 from pathlib import Path
 from typing import Optional
@@ -67,6 +68,8 @@ def verify_id_token(id_token: str) -> dict:
         if "uid" not in payload or "phone_number" not in payload:
             raise FirebaseAuthError("[DEV_BYPASS] token missing uid/phone_number")
         payload.setdefault("user_id", payload["uid"])
+        # Mock tokens count as just verified unless a test sets auth_time.
+        payload.setdefault("auth_time", int(time.time()))
         return payload
     if not is_enabled():
         raise FirebaseAuthError("Firebase Admin not configured on server")
