@@ -675,7 +675,7 @@ export default function EventForm({ editId }: Props) {
                 <Text style={styles.submitText}>
                   {isEdit
                     ? "Save Changes"
-                    : quota?.organizer && quota.organizer.free_events_remaining <= 0
+                    : quota?.organizer && quota.organizer.free_events_remaining <= 0 && !quota.organizer.fee_waived
                     ? `Publish for ₹${quota.organizer.platform_fee_inr}`
                     : "Publish Event"}
                 </Text>
