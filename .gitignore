@@ -97,3 +97,9 @@ credentials.json
 
 # VS Code Testing panel env (no secrets; points at the local test container)
 !.vscode/pytest.env
+
+# Android signing keys (keep them outside the repo if possible)
+android-secrets/
+
+# Raw phone captures for the store screenshots (regenerated, demo data only)
+frontend/store/screenshots/raw/

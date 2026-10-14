@@ -1,0 +1,10 @@
+[
+  { "raw": "01-discover.png", "headline": "Find the *vibe*\nnear you", "sub": "Concerts, comedy, workshops & more" },
+  { "raw": "02-event.png", "headline": "Everything you need\n*in one tap*", "sub": "Date, venue, map and price" },
+  { "raw": "03-seats.png", "headline": "Pick your\n*perfect seat*", "sub": "Seat maps, general entry and time slots" },
+  { "raw": "04-ticket.png", "headline": "Your ticket,\n*ready at the door*", "sub": "QR ticket · pay online or at the venue" },
+  { "raw": "05-bookings.png", "headline": "All your plans,\n*sorted*", "sub": "Upcoming and past bookings" },
+  { "raw": "06-create.png", "headline": "Host your event\n*in minutes*", "sub": "For organizers · first 5 events free" },
+  { "raw": "07-scanner.png", "headline": "Scan tickets\n*at the gate*", "sub": "Instant check-in, no extra device" },
+  { "raw": "08-analytics.png", "headline": "See what's\n*selling*", "sub": "Revenue, tickets and check-ins" }
+]
