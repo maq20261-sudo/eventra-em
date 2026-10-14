@@ -22,6 +22,11 @@ import { Skeleton } from "@/src/ui/Skeleton";
 import { Tag } from "@/src/ui/Tag";
 
 const SEAT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+// Seat map sizing (dp): seats shrink from MAX to MIN to fit the screen.
+const SEAT_MAX = 30;
+const SEAT_MIN = 20;
+const SEAT_MAP_PAD = spacing.sm; // seatWrap horizontal padding
+const ROW_LABEL_W = 16;
 
 export default function Booking() {
   const { colors } = useTheme();
@@ -601,17 +606,28 @@ function PayMethodOption({ active, disabled, badge, icon, title, subtitle, onPre
 function SeatMap({ rows, cols, booked, selected, onToggle, styles, colors }: {
   rows: number; cols: number; booked: string[]; selected: string[]; onToggle: (s: string) => void; styles: any; colors: Colors;
 }) {
+  // Shrink seats so every column fits the screen; below the minimum size
+  // the grid scrolls sideways instead (with a hint).
+  const [width, setWidth] = useState(0);
+  const fit = (gap: number) => Math.floor((width - SEAT_MAP_PAD * 2 - ROW_LABEL_W - cols * gap) / cols);
+  let gap = 6;
+  let size = width ? fit(gap) : SEAT_MAX;
+  if (size < 26) { gap = 4; size = fit(gap); }
+  const scrolls = size < SEAT_MIN;
+  size = Math.max(SEAT_MIN, Math.min(SEAT_MAX, size));
+  const seatSize = { width: size, height: size };
+
   return (
-    <View style={styles.seatWrap}>
+    <View style={styles.seatWrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <View style={styles.stage}>
         <Text style={styles.stageText}>STAGE</Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={scrolls} contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}>
         <View style={{ paddingVertical: spacing.md }}>
           {Array.from({ length: rows }).map((_, r) => {
             const rowLetter = SEAT_LETTERS[r];
             return (
-              <View key={r} style={styles.seatRow}>
+              <View key={r} style={[styles.seatRow, { gap, marginBottom: gap }]}>
                 <Text style={styles.rowLabel}>{rowLetter}</Text>
                 {Array.from({ length: cols }).map((_, c) => {
                   const seat = `${rowLetter}${c + 1}`;
@@ -623,6 +639,7 @@ function SeatMap({ rows, cols, booked, selected, onToggle, styles, colors }: {
                       testID={`seat-${seat}`}
                       style={({ pressed }) => [
                         styles.seat,
+                        seatSize,
                         isBooked && styles.seatTaken,
                         isSelected && styles.seatSelected,
                         pressed && { transform: [{ scale: 0.88 }] },
@@ -632,6 +649,7 @@ function SeatMap({ rows, cols, booked, selected, onToggle, styles, colors }: {
                     >
                       <Text style={[
                         styles.seatText,
+                        size < 26 && { fontSize: 9 },
                         isSelected && { color: colors.onBrandPrimary, fontWeight: "800" },
                         isBooked && { color: colors.borderStrong },
                       ]}>{c + 1}</Text>
@@ -643,6 +661,9 @@ function SeatMap({ rows, cols, booked, selected, onToggle, styles, colors }: {
           })}
         </View>
       </ScrollView>
+      {scrolls && (
+        <Text style={[styles.legendText, { textAlign: "center", marginBottom: spacing.sm }]}>Swipe sideways to see all seats →</Text>
+      )}
       <View style={styles.legendRow}>
         <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: colors.borderStrong }]} /><Text style={styles.legendText}>Available</Text></View>
         <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: colors.brandPrimary }]} /><Text style={styles.legendText}>Selected</Text></View>

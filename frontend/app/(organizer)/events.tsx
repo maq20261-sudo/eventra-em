@@ -40,6 +40,7 @@ type Event = {
   time_slots?: string[]; slot_capacities?: Record<string, number>; slot_capacity?: number;
   is_featured?: boolean; featured_until?: string | null;
   is_past?: boolean;
+  cancelled_at?: string | null;
   status?: EventStatus | string;
   hold_reasons?: string[];
 };
@@ -207,8 +208,9 @@ export default function OrganizerEvents() {
           {(() => {
             // Split events into Upcoming and Past groups so ended events
             // move out of the primary list into a "Past Events" section.
-            const upcoming = events.filter((x) => !x.is_past);
-            const past = events.filter((x) => x.is_past);
+            // Cancelled events go with the past ones.
+            const upcoming = events.filter((x) => !x.is_past && !x.cancelled_at);
+            const past = events.filter((x) => x.is_past || x.cancelled_at);
             const renderCard = (e: Event, dim: boolean = false) => {
               const cap = capacity(e);
               const pct = cap > 0 ? Math.min(100, Math.round((e.booked_count / cap) * 100)) : 0;
@@ -259,8 +261,8 @@ export default function OrganizerEvents() {
                       )}
                       {dim && (
                         <View style={styles.endedChip}>
-                          <Ionicons name="time-outline" size={11} color={colors.muted} />
-                          <Text style={styles.endedChipText}>Ended</Text>
+                          <Ionicons name={e.cancelled_at ? "close-circle-outline" : "time-outline"} size={11} color={colors.muted} />
+                          <Text style={styles.endedChipText}>{e.cancelled_at ? "Cancelled" : "Ended"}</Text>
                         </View>
                       )}
                       <View style={styles.progressWrap}>
@@ -277,7 +279,7 @@ export default function OrganizerEvents() {
                   </View>
                 </PressableScale>
                 <View style={styles.cardActions}>
-                  <Pressable
+                  {!e.cancelled_at && <Pressable
                     style={[styles.boostBtn, e.is_featured && styles.boostBtnActive]}
                     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setBoostEvent(e); }}
                     testID={`boost-btn-${e.id}`}
@@ -286,7 +288,7 @@ export default function OrganizerEvents() {
                     <Text style={[styles.boostText, e.is_featured && { color: colors.onLime }]}>
                       {e.is_featured ? "Featured" : "Boost"}
                     </Text>
-                  </Pressable>
+                  </Pressable>}
                   <Pressable
                     style={styles.editBtn}
                     onPress={() => router.push(`/(organizer)/edit/${e.id}` as any)}
@@ -312,7 +314,7 @@ export default function OrganizerEvents() {
                 {past.length > 0 && (
                   <View style={styles.sectionHeader} testID="past-events-section">
                     <Ionicons name="time-outline" size={16} color={colors.muted} />
-                    <Text style={styles.sectionTitle}>Past Events</Text>
+                    <Text style={styles.sectionTitle}>{past.some((x) => x.cancelled_at) ? "Past & cancelled" : "Past Events"}</Text>
                     <View style={styles.sectionCountPill}>
                       <Text style={styles.sectionCountText}>{past.length}</Text>
                     </View>

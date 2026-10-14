@@ -79,6 +79,7 @@ export const api = {
     email: string;
     password: string;
     role: "consumer" | "organizer";
+    mobile: string;
   }) => request("/auth/firebase-verify", { method: "POST", body: JSON.stringify(body) }),
 
   // Password reset — client presents a fresh Firebase Phone OTP token +
@@ -88,6 +89,7 @@ export const api = {
     id_token: string;
     new_password: string;
     role?: "consumer" | "organizer";
+    mobile: string;
   }) => request("/auth/password-reset/verify", { method: "POST", body: JSON.stringify(body) }),
 
   // Events
@@ -113,6 +115,9 @@ export const api = {
     request(`/events/${id}`, { method: "PUT", body: JSON.stringify(body) }, true),
   deleteEvent: (id: string) =>
     request(`/events/${id}`, { method: "DELETE" }, true),
+  // Organizer cancels an event: bookings cancelled + online payments refunded.
+  cancelEvent: (id: string, reason?: string) =>
+    request(`/events/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }, true),
   bookedSeats: (id: string, timeSlot?: string) =>
     request(
       `/events/${id}/booked-seats${timeSlot ? `?time_slot=${encodeURIComponent(timeSlot)}` : ""}`,

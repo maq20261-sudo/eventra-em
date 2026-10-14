@@ -69,6 +69,10 @@ export default function EventForm({ editId }: Props) {
   // in the DB). We surface it as a banner so organizers know when their
   // event is IN_REVIEW / ON_HOLD / REJECTED and see any hold reasons.
   const [status, setStatus] = useState<string | null>(null);
+  // Edit mode: decides between Delete and Cancel event.
+  const [bookedCount, setBookedCount] = useState(0);
+  const [eventEnded, setEventEnded] = useState(false);
+  const [cancelledAt, setCancelledAt] = useState<string | null>(null);
   const [holdReasons, setHoldReasons] = useState<string[]>([]);
   // Modal state for the "drop-a-pin on map" picker.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -106,6 +110,9 @@ export default function EventForm({ editId }: Props) {
     setTimeSlots([{ time: "", capacity: 50 }]);
     setStatus(null);
     setHoldReasons([]);
+    setBookedCount(0);
+    setEventEnded(false);
+    setCancelledAt(null);
     (async () => {
       try {
         const e = await api.getEvent(editId);
@@ -125,6 +132,9 @@ export default function EventForm({ editId }: Props) {
         setPrice(String(e.price));
         setBookingType(e.booking_type);
         setStatus(e.status || null);
+        setBookedCount(e.booked_count || 0);
+        setEventEnded(!!endISO && new Date(endISO).getTime() < Date.now());
+        setCancelledAt(e.cancelled_at || null);
         setHoldReasons(Array.isArray(e.hold_reasons) ? e.hold_reasons : []);
         if (e.seat_rows) setSeatRows(String(e.seat_rows));
         if (e.seat_cols) setSeatCols(String(e.seat_cols));
@@ -203,6 +213,10 @@ export default function EventForm({ editId }: Props) {
     };
     if (bookingType === "seat_map") {
       body.seat_rows = parseInt(seatRows) || 6;
+      if (body.seat_rows > 26) {
+        setError("Seat maps can have up to 26 rows (A–Z).");
+        return;
+      }
       body.seat_cols = parseInt(seatCols) || 8;
       // Optional: allow time slots on seat_map events too.
       const cleaned = timeSlots
@@ -278,15 +292,63 @@ export default function EventForm({ editId }: Props) {
     }
   };
 
+  const runCancelEvent = async () => {
+    if (!editId) return;
+    setLoading(true);
+    try {
+      const res = await api.cancelEvent(editId);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const n = res?.cancelled_bookings ?? 0;
+      Alert.alert(
+        "Event cancelled",
+        n > 0
+          ? `${n} booking${n === 1 ? " was" : "s were"} cancelled. Online payments are being refunded.`
+          : "The event is no longer visible to attendees.",
+        [{ text: "OK", onPress: () => router.replace("/(organizer)/events" as any) }]
+      );
+    } catch (e: any) {
+      Alert.alert("Couldn't cancel the event", e?.message || "Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doCancelEvent = () => {
+    Alert.alert(
+      "Cancel this event?",
+      bookedCount > 0
+        ? "Every attendee's ticket is cancelled and online payments are refunded. Attendees see the cancellation on their ticket. This can't be undone."
+        : "The event leaves Discover and can't be booked any more. This can't be undone.",
+      [
+        { text: "Keep event", style: "cancel" },
+        { text: "Cancel event", style: "destructive", onPress: runCancelEvent },
+      ]
+    );
+  };
+
   const doDelete = async () => {
     if (!editId) return;
+    // Live tickets: the server refuses to delete, so offer Cancel event.
+    if (!eventEnded && !cancelledAt && bookedCount > 0) {
+      Alert.alert(
+        "This event has bookings",
+        `${bookedCount} seat${bookedCount === 1 ? " is" : "s are"} booked, so it can't be deleted. Cancel the event instead: tickets are cancelled and online payments refunded.`,
+        [
+          { text: "Keep event", style: "cancel" },
+          { text: "Cancel event", style: "destructive", onPress: runCancelEvent },
+        ]
+      );
+      return;
+    }
     Alert.alert("Delete event?", "This cannot be undone.", [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
         try {
           await api.deleteEvent(editId);
           router.replace("/(organizer)/events" as any);
-        } catch (e: any) { setError(e?.message); }
+        } catch (e: any) {
+          Alert.alert("Couldn't delete the event", e?.message || "Please try again.");
+        }
       }},
     ]);
   };
@@ -325,7 +387,21 @@ export default function EventForm({ editId }: Props) {
               the backend surfaces a status. Non-ACTIVE events (IN_REVIEW,
               ON_HOLD, REJECTED) explain why the event isn't live yet and
               list any admin-provided hold reasons. */}
-          {isEdit && status && (() => {
+          {isEdit && cancelledAt && (
+            <View style={[styles.statusBanner, { backgroundColor: colors.error + "1A" }]} testID="event-cancelled-banner">
+              <View style={[styles.statusBannerIcon, { backgroundColor: colors.error + "22" }]}>
+                <Ionicons name="close-circle-outline" size={18} color={colors.error} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statusBannerTitle, { color: colors.error }]}>Event cancelled</Text>
+                <Text style={[styles.statusBannerSub, { color: colors.error }]}>
+                  Attendees' tickets were cancelled. It can't be edited any more, but you can delete it.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {isEdit && status && !cancelledAt && (() => {
             const meta = eventStatusMeta(status);
             return (
               <View
@@ -661,9 +737,16 @@ export default function EventForm({ editId }: Props) {
           )}
 
           {error && <Text style={styles.error} testID="form-error">{error}</Text>}
+
+          {isEdit && !cancelledAt && !eventEnded && (
+            <Pressable onPress={doCancelEvent} style={styles.cancelEventBtn} testID="cancel-event-btn" disabled={loading}>
+              <Ionicons name="close-circle-outline" size={18} color={colors.error} />
+              <Text style={styles.cancelEventText}>Cancel event</Text>
+            </Pressable>
+          )}
         </ScrollView>
 
-        <View style={styles.stickyBar}>
+        {!(isEdit && cancelledAt) && <View style={styles.stickyBar}>
           <Pressable
             style={[styles.submitBtn, loading && { opacity: 0.6 }]}
             onPress={submit}
@@ -683,7 +766,7 @@ export default function EventForm({ editId }: Props) {
               </>
             )}
           </Pressable>
-        </View>
+        </View>}
       </KeyboardAvoidingView>
 
       <LocationPicker
@@ -870,6 +953,12 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     backgroundColor: colors.error + "1A", padding: spacing.md, borderRadius: 14,
     borderWidth: 1, borderColor: colors.error + "55",
   },
+  cancelEventBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    marginTop: spacing.xl, paddingVertical: 14, borderRadius: 16,
+    borderWidth: 1, borderColor: colors.error + "55", backgroundColor: colors.error + "12",
+  },
+  cancelEventText: { color: colors.error, fontWeight: "800", fontSize: 15 },
   stickyBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
     backgroundColor: colors.surface,

@@ -31,6 +31,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       await setToken(null);
       setUser(null);
+      // Don't leave a verified Firebase phone session behind either.
+      await firebaseSignOut();
     } finally {
       setLoading(false);
     }

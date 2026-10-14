@@ -7,7 +7,8 @@ seat-map correctly displays as available.
 The fix (server.py):
   1) `_reconcile_event_availability()` rebuilds `booked_seats`, `booked_slots`,
      `booked_count` from `bookings` collection.
-  2) Called in `GET /api/events/{id}/booked-seats` (self-heal on read).
+  2) `GET /api/events/{id}/booked-seats` reads the bookings collection
+     directly (read-only since Part C #10).
   3) Called in `_perform_booking` after the atomic guard's first failure, then
      retries once (drift heals, real conflicts still fail).
   4) Startup routine reconciles ALL events every restart.
@@ -251,7 +252,7 @@ class TestDriftHealAndRetry:
         assert set(r.json()["seats"]) == {"F4"}
 
 
-    def test_get_booked_seats_self_heals_drift(self, organizer_tok):
+    def test_get_booked_seats_ignores_drift_read_only(self, organizer_tok):
         event = _create_seatmap_event(organizer_tok, "getheal")
         event_id = event["id"]
 
@@ -262,14 +263,13 @@ class TestDriftHealAndRetry:
                 {"id": event_id},
                 {"$set": {"booked_seats": ["BOGUS1", "BOGUS2"], "booked_count": 99}},
             )
-            # GET the endpoint — should trigger self-heal
+            # GET is read-only and answers from the bookings collection,
+            # so the drifted copy on the event doc doesn't leak through.
             r = requests.get(f"{BASE_URL}/api/events/{event_id}/booked-seats")
             assert r.status_code == 200
             assert r.json()["booked_seats"] == []  # no real bookings
-            # Verify event doc was scrubbed
             doc = db.events.find_one({"id": event_id}, {"_id": 0})
-            assert doc["booked_seats"] == []
-            assert doc["booked_count"] == 0
+            assert doc["booked_seats"] == ["BOGUS1", "BOGUS2"]  # not written by a GET
         finally:
             client.close()
 

@@ -10,7 +10,7 @@ import { useAuth } from "@/src/AuthContext";
 import { spacing, radius, shadows, fonts } from "@/src/theme";
 import { GlowBackground } from "@/src/ui/GlowBackground";
 import { useTheme, type Colors } from "@/src/ThemeContext";
-import { sendOtp, verifyOtp } from "@/src/firebase";
+import { firebaseSignOut, sendOtp, verifyOtp } from "@/src/firebase";
 import { getPhoneSession, setPhoneSession, clearPhoneSession } from "@/src/phoneSession";
 
 export default function ResetPassword() {
@@ -58,6 +58,7 @@ export default function ResetPassword() {
       id_token: idToken,
       new_password: password,
       role,
+      mobile: session?.mobile ?? "",
     });
     if (res && (res as any).multiple_roles) {
       const roles = (res as any).roles as string[];
@@ -68,6 +69,7 @@ export default function ResetPassword() {
     }
     await signInWithToken(res.access_token, res.user);
     clearPhoneSession();
+    firebaseSignOut();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert(
       "Password updated",

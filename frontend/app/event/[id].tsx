@@ -191,6 +191,8 @@ export default function EventDetail() {
               testID="edit-event-btn"
               style={{ flex: 1 }}
             />
+          ) : event.cancelled_at ? (
+            <Button title="Event cancelled" variant="ghost" icon="close-circle-outline" disabled style={{ flex: 1 }} testID="event-cancelled-btn" />
           ) : user?.role === "consumer" ? (
             <Button
               title={event.booking_type === "seat_map" ? "Select Seats" : event.booking_type === "time_slot" ? "Pick Slot" : "Book Now"}

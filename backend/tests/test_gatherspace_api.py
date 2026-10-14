@@ -319,6 +319,13 @@ class TestAnalytics:
 
 class TestZCleanup:
     def test_delete_seat_map_event(self, api, organizer_headers):
+        # Upcoming events with bookings must be cancelled before deleting.
+        r = api.delete(f"{BASE_URL}/api/events/{pytest.seat_map_event_id}",
+                       headers=organizer_headers)
+        assert r.status_code == 409
+        r = api.post(f"{BASE_URL}/api/events/{pytest.seat_map_event_id}/cancel",
+                     json={}, headers=organizer_headers)
+        assert r.status_code == 200, r.text
         r = api.delete(f"{BASE_URL}/api/events/{pytest.seat_map_event_id}",
                        headers=organizer_headers)
         assert r.status_code == 200
@@ -326,6 +333,9 @@ class TestZCleanup:
         assert api.get(f"{BASE_URL}/api/events/{pytest.seat_map_event_id}").status_code == 404
 
     def test_delete_general_event(self, api, organizer_headers):
+        r = api.post(f"{BASE_URL}/api/events/{pytest.general_event_id}/cancel",
+                     json={}, headers=organizer_headers)
+        assert r.status_code == 200, r.text
         r = api.delete(f"{BASE_URL}/api/events/{pytest.general_event_id}",
                        headers=organizer_headers)
         assert r.status_code == 200
