@@ -1,0 +1,97 @@
+# Web app CI/CD (app.gatherspace.in)
+#   every push / PR touching the frontend → typecheck + build the web version
+#   push to main                         → upload to Lightsail, switch web/current
+#
+# Caddy serves /opt/gatherspace/web/current (see deploy/Caddyfile); the
+# backend workflow owns the Caddy/compose config.
+#
+# Needs (Settings → Secrets and variables → Actions), besides the deploy
+# secrets/variables backend.yml uses:
+#   variables: FIREBASE_WEB_API_KEY, FIREBASE_WEB_APP_ID  (public Firebase
+#              web-app config; the key is restricted to our domains)
+name: web
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/web.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/web.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - name: Build web
+        run: npx expo export -p web --output-dir dist
+        env:
+          EXPO_PUBLIC_BACKEND_URL: https://${{ vars.API_DOMAIN || 'api.gatherspace.in' }}
+          EXPO_PUBLIC_FIREBASE_WEB_API_KEY: ${{ vars.FIREBASE_WEB_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_WEB_APP_ID: ${{ vars.FIREBASE_WEB_APP_ID }}
+      - run: tar -czf ../web.tgz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: web.tgz
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+      - name: Upload build
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: web.tgz
+          target: /opt/gatherspace/web/incoming
+      - name: Switch to the new release
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          envs: RELEASE
+          script: |
+            set -euo pipefail
+            cd /opt/gatherspace/web
+            mkdir -p "releases/$RELEASE"
+            tar -xzf incoming/web.tgz -C "releases/$RELEASE"
+            rm -rf incoming
+            # Atomic switch: Caddy follows the relative symlink inside its mount.
+            ln -sfn "releases/$RELEASE" current.tmp
+            mv -T current.tmp current
+            # Keep the 3 newest releases for a quick manual rollback.
+            ls -1dt releases/*/ | tail -n +4 | xargs -r rm -rf
+        env:
+          RELEASE: ${{ github.sha }}
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 10); do
+            curl -fsS "https://${{ vars.WEB_DOMAIN || 'app.gatherspace.in' }}/" | grep -q '<div id="root">' && exit 0
+            sleep 6
+          done
+          exit 1

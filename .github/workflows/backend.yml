@@ -125,7 +125,16 @@ jobs:
             printf 'IMAGE_TAG=%s\nAPI_DOMAIN=%s\n' "$IMAGE_TAG" "$API_DOMAIN" > .env
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose -f docker-compose.prod.yml pull
+            mkdir -p web/releases
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # The Caddyfile is a single-file bind mount: a copied-over file is
+            # a new inode the running container doesn't see. Recreate Caddy
+            # when its config changed.
+            new_sum=$(sha256sum Caddyfile | cut -c1-64)
+            if [ "$new_sum" != "$(cat .caddyfile.sha256 2>/dev/null || true)" ]; then
+              docker compose -f docker-compose.prod.yml up -d --force-recreate caddy
+              echo "$new_sum" > .caddyfile.sha256
+            fi
             docker logout ghcr.io
             docker image prune -f
         env:

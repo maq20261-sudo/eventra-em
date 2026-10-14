@@ -27,9 +27,10 @@ Secrets never go into git or the Docker image. On the server they live in
 | Server | Lightsail `gatherspace-api`, `micro_3_1` ($7), ap-south-1a, Ubuntu 24.04, static IP `gatherspace-api-ip` = **65.2.231.136**, ports 22/80/443 |
 | SSH | Admin key `~/.ssh/gs_admin` on the owner's PC (Lightsail key pair `gs-admin`): `ssh -i ~/.ssh/gs_admin ubuntu@65.2.231.136`. GitHub deploy key: only in the `LIGHTSAIL_SSH_KEY` secret. |
 | Atlas | Project GatherSpace, cluster `cluster0` (M0, AWS Mumbai), Atlas default user, DB name `gatherspace`; IP access: 65.2.231.136 (+ the owner's PC, temporary) |
-| DNS | GoDaddy: `A api → 65.2.231.136` |
+| DNS | GoDaddy: `A api → 65.2.231.136`, `A app → 65.2.231.136` (web app) |
 | Razorpay | **Test keys** in production until live activation — KYC was rejected (Individual business type not supported for event ticketing; next: reapply as sole proprietorship / company). Webhook not configured yet (`/payments/webhook` returns 503 until `RAZORPAY_WEBHOOK_SECRET` is set). |
-| GitHub | Environment `production` (no approval), secrets `LIGHTSAIL_HOST/USER/SSH_KEY`, variables `API_DOMAIN`, `DEPLOY_ENABLED=true` |
+| GitHub | Environment `production` (no approval), secrets `LIGHTSAIL_HOST/USER/SSH_KEY`, variables `API_DOMAIN`, `DEPLOY_ENABLED=true`, `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_APP_ID` |
+| Web app | `https://app.gatherspace.in` — Expo web build served by the same Caddy from `/opt/gatherspace/web/current` (→ `web/releases/<sha>`), deployed by `.github/workflows/web.yml` on frontend changes. Installable ("Add to Home Screen"). Phone OTP on web uses the Firebase JS SDK + invisible reCAPTCHA (Firebase **Web app** config; domain in Firebase Auth → Authorized domains; API key restricted to HTTP referrers `app.gatherspace.in`, `localhost`). |
 
 **Change a secret on the server** (value never shown): `/opt/gatherspace/set-secret.sh KEY`, then `docker compose -f docker-compose.prod.yml up -d backend`.
 
@@ -157,6 +158,10 @@ cd /opt/gatherspace
 docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml logs -f backend     # logs
 ```
+
+**Web app rollback**: `cd /opt/gatherspace/web && ls -dt releases/*` → `ln -sfn releases/<older sha> current.tmp && mv -T current.tmp current` (the last 3 builds are kept; no restart needed).
+
+**Web app locally**: `cd frontend; npx expo start --web` (or `npx expo export -p web` for the production build). Browser-only code lives in `*.web.ts` files (`src/firebase.web.ts`); `src/webAlert.ts` maps `Alert.alert` to browser dialogs.
 
 **Rollback**: set `IMAGE_TAG=<previous commit sha>` in `/opt/gatherspace/.env`, then `docker compose -f docker-compose.prod.yml up -d`. (Every main commit has an image tagged with its sha in GHCR.)
 

@@ -29,3 +29,36 @@
 		format console
 	}
 }
+
+# Web app (Expo web build). GitHub Actions (web.yml) uploads each build to
+# /opt/gatherspace/web/releases/<sha> and points web/current at it.
+{$WEB_DOMAIN} {
+	encode zstd gzip
+	root * /srv/web/current
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Bundles and assets have content hashes in their names: cache forever.
+	# Everything else (the HTML shell, manifest, icons) must stay fresh so a
+	# new deploy shows up on the next visit.
+	@hashed path /_expo/static/* /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	@fresh not path /_expo/static/* /assets/*
+	header @fresh Cache-Control "no-cache"
+	@manifest path *.webmanifest
+	header @manifest Content-Type application/manifest+json
+
+	# Client-side routes (/events, /ticket/…) all load the app shell.
+	try_files {path} /index.html
+	file_server
+
+	log {
+		output stdout
+		format console
+	}
+}
