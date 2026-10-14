@@ -12,6 +12,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import requests
 
 BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "http://localhost:8001").rstrip("/")
@@ -31,6 +32,19 @@ def _register(role: str) -> str:
     return r.json()["access_token"]
 
 
+_created = []  # (organizer token, event id) — removed after the module
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _remove_test_events():
+    """Sold-out test events must not linger in Discover: other test modules
+    book "the first general event" they find."""
+    yield
+    for tok, event_id in _created:
+        requests.post(f"{BASE_URL}/api/events/{event_id}/cancel", json={}, headers=_headers(tok))
+        requests.delete(f"{BASE_URL}/api/events/{event_id}", headers=_headers(tok))
+
+
 def _create_event(org_tok, **fields):
     payload = {
         "title": f"TEST_PartC {uuid.uuid4().hex[:6]}",
@@ -45,6 +59,7 @@ def _create_event(org_tok, **fields):
     payload.update(fields)
     r = requests.post(f"{BASE_URL}/api/events", json=payload, headers=_headers(org_tok))
     assert r.status_code in (200, 201), r.text
+    _created.append((org_tok, r.json()["id"]))
     return r.json()
 
 
