@@ -4,7 +4,7 @@ Single source of truth for "what is this project, how does it work, what has
 been decided and done". Update the **History** section at the end of every
 work session. Status and next steps live in `ROADMAP.md`.
 
-_Last updated: 2026-10-11_
+_Last updated: 2026-10-15_
 
 ---
 
@@ -47,7 +47,7 @@ The app must never hardcode amounts — read `/api/pricing/config` and `/api/quo
   - `(consumer)/` discover, bookings ("My Tickets"), profile
   - `(organizer)/` events, create, scanner, analytics, profile (re-exports consumer profile), `edit/[id]`
   - `event/[id]`, `book/[id]` (incl. full-screen confirmation), `ticket/[id]`, `index` (role redirect)
-- Key modules (`src/`): `api.ts` (fetch wrapper, base URL from `EXPO_PUBLIC_BACKEND_URL`), `AuthContext.tsx` (JWT + Firebase), `firebase.ts`, `ThemeContext.tsx` (palettes), `theme.ts` (spacing/radius/fonts/shadows), `EventForm.tsx` (create/edit), `RazorpayCheckout.tsx`, `EventMap.tsx` / `LocationPicker.tsx` (Leaflet in WebView, OSM tiles recoloured dark), `LocationSearchField.tsx` (Google Places via backend proxy), `hooks/usePricing.ts`, `utils/` (urgency, countdown, areaName, eventStatus, ticketLabel, eventTypeLabel, storage).
+- Key modules (`src/`): `api.ts` (fetch wrapper, base URL from `EXPO_PUBLIC_BACKEND_URL`), `AuthContext.tsx` (JWT + Firebase), `firebase.ts` (native, `@react-native-firebase`) / `firebase.web.ts` (web, Firebase JS SDK + invisible reCAPTCHA; Metro picks `*.web.ts` for web), `webAlert.ts` (`Alert.alert` on web), `ThemeContext.tsx` (palettes), `theme.ts` (spacing/radius/fonts/shadows), `EventForm.tsx` (create/edit), `RazorpayCheckout.tsx`, `EventMap.tsx` / `LocationPicker.tsx` (Leaflet in WebView, OSM tiles recoloured dark), `LocationSearchField.tsx` (Google Places via backend proxy), `hooks/usePricing.ts`, `utils/` (urgency, countdown, areaName, eventStatus, ticketLabel, eventTypeLabel, storage).
 - Design-system components: `src/ui/` — `Text` (font-aware Text/TextInput), `Button`, `Tag`, `PressableScale`, `GlowBackground`, `Skeleton`, `EmptyState`, `Confetti`, `NeonTabBar`, `motion.ts` (`softPop`).
 - OTA updates: `expo-updates`, runtime policy `appVersion`, URL `https://u.expo.dev/fc1b7265-9d57-4f91-ad33-98518f8b489a`, channels from `eas.json` (development / preview / production).
 - EAS project owner `maq2026s-team`, project id `fc1b7265-9d57-4f91-ad33-98518f8b489a`. Profiles: `development` (dev client, internal), `preview` (internal APK → `https://api.gatherspace.in`), `production` (store, auto-increment → `https://api.gatherspace.in`).
@@ -116,9 +116,13 @@ The app must never hardcode amounts — read `/api/pricing/config` and `/api/quo
 | 2026-10-11 | **First production deploy**: B1+B2 merged into `main` (PR #1), CI/CD deployed to Lightsail; verified health, HTTPS/HSTS, S3 images, backups. Preview APK tested OK on the owner's phone. | `4c0bc29` |
 | 2026-10-11 | **Secret guards** (repo stays public): `.githooks/pre-commit` + `check_secrets.py`, gitleaks CI workflow `secrets` + `.gitleaks.toml`, GitHub secret scanning/push protection, history audit clean, CLAUDE.md "Secrets" section. | `b75546e` |
 | 2026-10-11 | **Payments "coming soon" switch** (`PAYMENTS_ENABLED`): online checkout disabled with COMING SOON tag, organizer fee waived past free tier, free 24 h boost only (7/30 d coming soon) + 7 tests; set to `0` on production. | `658d363` |
-| 2026-10-11 | Production APK profile `production-apk` in `eas.json` (uncommitted, branch `chore/production-apk-profile`); first production-config APK built (1.0.0, versionCode 2) for owner testing. iOS build blocked at device registration. | — |
+| 2026-10-11 | Production APK profile `production-apk` in `eas.json`; first production-config APK built for owner testing. iOS build blocked at device registration. | `9c17839` (PR #4) |
+| 2026-10-12 | **New brand icon + splash** (design "H", G + S mark), version 1.1.0; Play App Signing SHA-1/256 added to Firebase; EAS version counter set above Play's 141. | `d813c31` (PR #5) |
+| 2026-10-13 | **Play Store screenshot set** (8 designed English screens, captured over USB from seeded local data) + feature graphic; free-launch publish button label fix. Upload-key reset requested in Play Console. | `6a63e38` (PR #6) |
+| 2026-10-14 | **Part C bug fixes**: OTP replay (typed mobile + fresh `auth_time` required), oversell (per-event Mongo lock + bookings snapshot), organizer **Cancel event** with refunds (delete refused while bookings exist), seat validation (≤ 26 rows), read-only booked-seats, server cancel cutoff, responsive seat map. Production APK **143** tested by the owner. | `0ba146c` (PR #7) |
+| 2026-10-15 | **Web app** `https://app.gatherspace.in` for iPhone users: Expo web build served by Caddy on the same Lightsail box (`web.yml` CI/CD, atomic releases), PWA (Add to Home Screen), web phone OTP via Firebase JS SDK. Tested by the owner on iPhone Safari. | `bb255dc` (PR #8) |
 
 `main` is now the real branch (all earlier work merged); production deploys from it. Work happens on short-lived branches + PRs (the owner creates/merges PRs on GitHub web).
 
 ### Production (Part B) at a glance
-`https://api.gatherspace.in` → Lightsail 1 GB Mumbai (Caddy + backend container from GHCR) → MongoDB Atlas M0 Mumbai; S3 `gatherspace-prod-media` (`event-images/` public, `backups/mongo/` private, 30-day expiry). Deploys: push to `main` → `.github/workflows/backend.yml`. Runbook: `docs/DEPLOYMENT.md`.
+`https://api.gatherspace.in` → Lightsail 1 GB Mumbai (Caddy + backend container from GHCR) → MongoDB Atlas M0 Mumbai; S3 `gatherspace-prod-media` (`event-images/` public, `backups/mongo/` private, 30-day expiry). Deploys: push to `main` → `.github/workflows/backend.yml`. Web app `https://app.gatherspace.in` → same Caddy, files in `/opt/gatherspace/web/current`, deployed by `.github/workflows/web.yml`. Runbook: `docs/DEPLOYMENT.md`.
