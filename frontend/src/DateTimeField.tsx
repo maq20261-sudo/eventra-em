@@ -218,14 +218,13 @@ function WebField({ label, value, onChange, minDate, testID, mode, styles, color
             const parsed = new Date(mode === "time" ? `1970-01-01T${v}` : v);
             if (!isNaN(parsed.getTime())) onChange(parsed);
           }}
-          // @ts-expect-error react-native-web accepts DOM attrs
-          type={inputType}
-          min={minDate ? toLocal(minDate) : undefined}
+          // react-native-web passes DOM attrs (type/min) and CSS (outline) through.
+          {...({ type: inputType, min: minDate ? toLocal(minDate) : undefined } as any)}
           style={{
             fontSize: 15, color: colors.onSurface, fontWeight: "500",
             marginTop: 2, borderWidth: 0, padding: 0, backgroundColor: "transparent",
-            outline: "none" as any,
-          }}
+            outline: "none",
+          } as any}
           placeholder="Tap to pick"
         />
       </View>
